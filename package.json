@@ -1,0 +1,16 @@
+{
+  "name": "llm-startup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo \"No build step required.\"",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test tests/unit",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.46.0"
+  }
+}
