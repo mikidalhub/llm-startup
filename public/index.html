@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Market Autopilot MVP</title>
+    <title>Market Autopilot Control Deck</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -17,7 +17,39 @@
         background: radial-gradient(circle at top, #1f2937, #0b0f14 60%);
       }
       h1 {
-        margin-bottom: 8px;
+        margin: 0 0 8px;
+        font-size: clamp(24px, 3vw, 36px);
+      }
+      p {
+        line-height: 1.5;
+      }
+      .hero {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        margin-bottom: 24px;
+      }
+      .hero-card {
+        background: linear-gradient(135deg, rgba(15, 118, 110, 0.25), rgba(17, 24, 39, 0.9));
+        border: 1px solid #164e63;
+        border-radius: 16px;
+        padding: 20px;
+      }
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: #0f172a;
+        border: 1px solid #1f2937;
+        font-size: 12px;
       }
       .grid {
         display: grid;
@@ -27,9 +59,14 @@
       .card {
         background: #111827;
         border: 1px solid #1f2937;
-        border-radius: 12px;
-        padding: 16px;
+        border-radius: 16px;
+        padding: 18px;
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        min-height: 160px;
+      }
+      .card h2 {
+        margin-top: 0;
+        font-size: 18px;
       }
       .tag {
         display: inline-flex;
@@ -39,8 +76,21 @@
         font-size: 12px;
         margin-right: 8px;
       }
+      .pulse {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #22c55e;
+        box-shadow: 0 0 12px #22c55e;
+      }
       .muted {
         color: #9ca3af;
+      }
+      .callout {
+        border-left: 3px solid #22c55e;
+        padding-left: 12px;
+        margin: 12px 0 0;
+        color: #e2e8f0;
       }
       ul {
         list-style: none;
@@ -50,16 +100,71 @@
       li + li {
         margin-top: 8px;
       }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .status-card {
+        display: grid;
+        gap: 10px;
+      }
+      .timeline {
+        display: grid;
+        gap: 12px;
+      }
+      .timeline-item {
+        display: grid;
+        gap: 4px;
+        border-left: 2px solid #1f2937;
+        padding-left: 12px;
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>Autonomous Markets MVP</h1>
-      <p class="muted">Server-Sent Events stream updates automatically. No user input required.</p>
+      <section class="hero">
+        <div class="hero-card">
+          <h1>Autonomous Markets Control Deck</h1>
+          <p class="muted">Continuous global signal synthesis with automated portfolio biasing.</p>
+          <p class="callout">
+            Architecture: A single Node service generates market + macro signals, runs a decision/risk pass, and emits
+            SSE events that the UI renders in real time. The frontend is a static dashboard that listens to the stream
+            and refreshes without user input.
+          </p>
+          <div class="hero-meta">
+            <span class="chip"><span class="pulse"></span> Live stream</span>
+            <span class="chip">SSE updates</span>
+            <span class="chip">No user actions</span>
+          </div>
+        </div>
+        <div class="hero-card">
+          <h2>Update Source</h2>
+          <p class="muted">Streaming from the backend simulation pipeline.</p>
+          <div class="timeline">
+            <div class="timeline-item">
+              <strong>Signal generation</strong>
+              <span class="muted">Synthetic markets + macro signals refreshed.</span>
+            </div>
+            <div class="timeline-item">
+              <strong>Decision + risk</strong>
+              <span class="muted">Portfolio bias and allocation computed.</span>
+            </div>
+            <div class="timeline-item">
+              <strong>LLM commentary</strong>
+              <span class="muted">Mock or Ollama summary attached.</span>
+            </div>
+          </div>
+        </div>
+      </section>
       <div class="grid">
         <section class="card">
           <h2>LLM Context</h2>
-          <div id="llm-provider" class="tag">provider</div>
+          <div class="row">
+            <div id="llm-provider" class="tag">provider</div>
+            <div class="tag">Source: <span id="llm-source">-</span></div>
+          </div>
           <p id="llm-summary" class="muted">Waiting for signal...</p>
         </section>
         <section class="card">
@@ -88,8 +193,11 @@
         </section>
         <section class="card">
           <h2>Status</h2>
-          <p class="muted">Last update: <span id="last-updated">-</span></p>
-          <p class="muted">SSE connection: <span id="connection-status">connecting...</span></p>
+          <div class="status-card">
+            <p class="muted">Last update: <span id="last-updated">-</span></p>
+            <p class="muted">SSE connection: <span id="connection-status">connecting...</span></p>
+            <p class="muted">Update cadence: <span id="update-cadence">-</span></p>
+          </div>
         </section>
       </div>
     </main>
@@ -120,6 +228,7 @@
         setText("decision-region", state.decision.preferredRegion);
         setText("llm-provider", state.llm.provider);
         setText("llm-summary", state.llm.summary);
+        setText("llm-source", state.llm.provider === "ollama" ? "Local Ollama" : "Mock engine");
 
         renderList("markets-list", state.markets, (market) =>
           `${market.region} (${market.index}): ${market.dailyChangePct}% | momentum ${market.momentumScore} | vol ${market.volatilityScore}`
@@ -131,10 +240,18 @@
 
       const connectionStatus = document.getElementById("connection-status");
       const source = new EventSource("/events");
+      const cadence = document.getElementById("update-cadence");
+
+      let lastEvent = null;
 
       source.addEventListener("state", (event) => {
         const data = JSON.parse(event.data);
         updateUI(data);
+        if (lastEvent) {
+          const diffSeconds = Math.round((Date.now() - lastEvent) / 1000);
+          cadence.textContent = `${diffSeconds}s`;
+        }
+        lastEvent = Date.now();
       });
 
       source.addEventListener("open", () => {

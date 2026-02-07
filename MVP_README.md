@@ -27,6 +27,9 @@ The default LLM provider is a **mock** summary. To use a free local model instea
    LLM_PROVIDER=ollama docker compose up --build
    ```
 
+**Is this free?** Ollama runs models locally on your machine, so there is no paid API usage. You only pay for your own
+compute resources (CPU/GPU).
+
 ### Option B: LM Studio / Local APIs
 You can expose a local OpenAI-compatible endpoint and point `OLLAMA_URL` to it (or update the code to match your provider).
 
