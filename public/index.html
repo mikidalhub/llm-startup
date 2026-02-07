@@ -3,12 +3,147 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Startup</title>
+    <title>Market Autopilot MVP</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Inter", system-ui, sans-serif;
+        background: #0b0f14;
+        color: #f8fafc;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        background: radial-gradient(circle at top, #1f2937, #0b0f14 60%);
+      }
+      h1 {
+        margin-bottom: 8px;
+      }
+      .grid {
+        display: grid;
+        gap: 20px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+      .card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      }
+      .tag {
+        display: inline-flex;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #1e293b;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+      .muted {
+        color: #9ca3af;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      li + li {
+        margin-top: 8px;
+      }
+    </style>
   </head>
   <body>
     <main>
-      <h1>LLM Startup</h1>
-      <p>Welcome to the starter app.</p>
+      <h1>Autonomous Markets MVP</h1>
+      <p class="muted">Server-Sent Events stream updates automatically. No user input required.</p>
+      <div class="grid">
+        <section class="card">
+          <h2>LLM Context</h2>
+          <div id="llm-provider" class="tag">provider</div>
+          <p id="llm-summary" class="muted">Waiting for signal...</p>
+        </section>
+        <section class="card">
+          <h2>Macro Signals</h2>
+          <ul>
+            <li><strong>Inflation:</strong> <span id="macro-inflation">-</span></li>
+            <li><strong>Rates:</strong> <span id="macro-rates">-</span></li>
+            <li><strong>Growth:</strong> <span id="macro-growth">-</span></li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Decision Engine</h2>
+          <ul>
+            <li><strong>Bias:</strong> <span id="decision-bias">-</span></li>
+            <li><strong>Risk Score:</strong> <span id="decision-risk">-</span></li>
+            <li><strong>Preferred Region:</strong> <span id="decision-region">-</span></li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Markets Snapshot</h2>
+          <ul id="markets-list"></ul>
+        </section>
+        <section class="card">
+          <h2>Target Allocation</h2>
+          <ul id="allocation-list"></ul>
+        </section>
+        <section class="card">
+          <h2>Status</h2>
+          <p class="muted">Last update: <span id="last-updated">-</span></p>
+          <p class="muted">SSE connection: <span id="connection-status">connecting...</span></p>
+        </section>
+      </div>
     </main>
+    <script>
+      const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value ?? "-";
+      };
+
+      const renderList = (id, items, formatter) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = "";
+        items.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = formatter(item);
+          el.appendChild(li);
+        });
+      };
+
+      const updateUI = (state) => {
+        setText("last-updated", new Date(state.timestamp).toLocaleTimeString());
+        setText("macro-inflation", state.macro.inflationTrend);
+        setText("macro-rates", state.macro.ratesOutlook);
+        setText("macro-growth", state.macro.growthSignal);
+        setText("decision-bias", state.decision.bias);
+        setText("decision-risk", `${state.decision.riskScore}/100`);
+        setText("decision-region", state.decision.preferredRegion);
+        setText("llm-provider", state.llm.provider);
+        setText("llm-summary", state.llm.summary);
+
+        renderList("markets-list", state.markets, (market) =>
+          `${market.region} (${market.index}): ${market.dailyChangePct}% | momentum ${market.momentumScore} | vol ${market.volatilityScore}`
+        );
+        renderList("allocation-list", state.decision.allocation, (allocation) =>
+          `${allocation.sleeve}: ${allocation.targetPct}%`
+        );
+      };
+
+      const connectionStatus = document.getElementById("connection-status");
+      const source = new EventSource("/events");
+
+      source.addEventListener("state", (event) => {
+        const data = JSON.parse(event.data);
+        updateUI(data);
+      });
+
+      source.addEventListener("open", () => {
+        connectionStatus.textContent = "connected";
+      });
+
+      source.addEventListener("error", () => {
+        connectionStatus.textContent = "disconnected";
+      });
+    </script>
   </body>
 </html>
