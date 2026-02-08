@@ -29,6 +29,33 @@
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         margin-bottom: 24px;
       }
+      .monitoring-card {
+        position: relative;
+        overflow: hidden;
+        background: radial-gradient(circle at top, rgba(56, 189, 248, 0.2), rgba(15, 23, 42, 0.9));
+      }
+      .monitoring-card::before {
+        content: "";
+        position: absolute;
+        inset: -40% 20% auto auto;
+        width: 260px;
+        height: 260px;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.4), transparent 60%);
+        filter: blur(10px);
+        opacity: 0.7;
+        pointer-events: none;
+      }
+      .monitoring-card::after {
+        content: "";
+        position: absolute;
+        inset: auto auto -40% -20%;
+        width: 240px;
+        height: 240px;
+        background: radial-gradient(circle, rgba(34, 197, 94, 0.35), transparent 65%);
+        filter: blur(8px);
+        opacity: 0.6;
+        pointer-events: none;
+      }
       .hero-card {
         background: linear-gradient(135deg, rgba(15, 118, 110, 0.25), rgba(17, 24, 39, 0.9));
         border: 1px solid #164e63;
@@ -120,6 +147,128 @@
         border-left: 2px solid #1f2937;
         padding-left: 12px;
       }
+      .monitoring-ring {
+        position: relative;
+        width: min(320px, 100%);
+        aspect-ratio: 1;
+        margin: 16px auto 0;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(15, 23, 42, 0.9) 40%, rgba(15, 23, 42, 0.2) 80%);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        box-shadow: 0 0 40px rgba(56, 189, 248, 0.2);
+      }
+      .monitoring-ring::before {
+        content: "";
+        position: absolute;
+        inset: 16%;
+        border-radius: 50%;
+        border: 1px dashed rgba(148, 163, 184, 0.3);
+      }
+      .ring-center {
+        position: absolute;
+        inset: 32%;
+        border-radius: 50%;
+        background: rgba(15, 23, 42, 0.8);
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        backdrop-filter: blur(8px);
+      }
+      .ring-center h3 {
+        margin: 0;
+        font-size: 14px;
+        color: #e2e8f0;
+      }
+      .ring-center p {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .ring-step {
+        position: absolute;
+        width: 88px;
+        height: 88px;
+        border-radius: 50%;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 11px;
+        color: #94a3b8;
+        transition: all 0.4s ease;
+        backdrop-filter: blur(10px);
+      }
+      .ring-step.active {
+        color: #f8fafc;
+        border-color: rgba(34, 197, 94, 0.8);
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+        transform: scale(1.05);
+      }
+      .ring-step span {
+        display: block;
+        font-weight: 600;
+        color: inherit;
+      }
+      .ring-step small {
+        display: block;
+        font-size: 10px;
+        color: inherit;
+        opacity: 0.8;
+      }
+      .ring-step.step-0 {
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .ring-step.step-1 {
+        top: 20%;
+        right: -6px;
+      }
+      .ring-step.step-2 {
+        bottom: 18%;
+        right: 0;
+      }
+      .ring-step.step-3 {
+        bottom: -8px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .ring-step.step-4 {
+        bottom: 18%;
+        left: 0;
+      }
+      .ring-step.step-5 {
+        top: 20%;
+        left: -6px;
+      }
+      .glow-line {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(56, 189, 248, 0.2);
+        animation: spin 14s linear infinite;
+      }
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (max-width: 640px) {
+        body {
+          padding: 20px;
+        }
+        .ring-step {
+          width: 72px;
+          height: 72px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -139,21 +288,38 @@
             <span class="chip">No user actions</span>
           </div>
         </div>
-        <div class="hero-card">
-          <h2>Update Source</h2>
-          <p class="muted">Streaming from the backend simulation pipeline.</p>
-          <div class="timeline">
-            <div class="timeline-item">
-              <strong>Signal generation</strong>
-              <span class="muted">Synthetic markets + macro signals refreshed.</span>
+        <div class="hero-card monitoring-card">
+          <h2>Realtime Monitoring Ring</h2>
+          <p class="muted">Follow the live decision cycle at a glance.</p>
+          <div class="monitoring-ring" aria-live="polite">
+            <div class="glow-line"></div>
+            <div class="ring-center">
+              <h3 id="ring-status-title">Pipeline Live</h3>
+              <p id="ring-status-detail">Awaiting updates...</p>
             </div>
-            <div class="timeline-item">
-              <strong>Decision + risk</strong>
-              <span class="muted">Portfolio bias and allocation computed.</span>
+            <div class="ring-step step-0" data-step="0">
+              <span>Ingestion</span>
+              <small>Markets + macro</small>
             </div>
-            <div class="timeline-item">
-              <strong>LLM commentary</strong>
-              <span class="muted">Mock or Ollama summary attached.</span>
+            <div class="ring-step step-1" data-step="1">
+              <span>Feature</span>
+              <small>Indicators</small>
+            </div>
+            <div class="ring-step step-2" data-step="2">
+              <span>LLM</span>
+              <small>Macro summary</small>
+            </div>
+            <div class="ring-step step-3" data-step="3">
+              <span>Decision</span>
+              <small>Portfolio bias</small>
+            </div>
+            <div class="ring-step step-4" data-step="4">
+              <span>Risk</span>
+              <small>Constraint check</small>
+            </div>
+            <div class="ring-step step-5" data-step="5">
+              <span>Execution</span>
+              <small>Trade plan</small>
             </div>
           </div>
         </div>
@@ -241,12 +407,28 @@
       const connectionStatus = document.getElementById("connection-status");
       const source = new EventSource("/events");
       const cadence = document.getElementById("update-cadence");
+      const ringTitle = document.getElementById("ring-status-title");
+      const ringDetail = document.getElementById("ring-status-detail");
+      const ringSteps = Array.from(document.querySelectorAll(".ring-step"));
 
       let lastEvent = null;
+      let activeStep = 0;
+
+      const setActiveStep = (index) => {
+        ringSteps.forEach((step) => step.classList.remove("active"));
+        const active = ringSteps.find((step) => Number(step.dataset.step) === index);
+        if (active) {
+          active.classList.add("active");
+          ringTitle.textContent = active.querySelector("span").textContent;
+          ringDetail.textContent = active.querySelector("small").textContent;
+        }
+      };
 
       source.addEventListener("state", (event) => {
         const data = JSON.parse(event.data);
         updateUI(data);
+        activeStep = (activeStep + 1) % ringSteps.length;
+        setActiveStep(activeStep);
         if (lastEvent) {
           const diffSeconds = Math.round((Date.now() - lastEvent) / 1000);
           cadence.textContent = `${diffSeconds}s`;
@@ -256,6 +438,7 @@
 
       source.addEventListener("open", () => {
         connectionStatus.textContent = "connected";
+        setActiveStep(activeStep);
       });
 
       source.addEventListener("error", () => {
