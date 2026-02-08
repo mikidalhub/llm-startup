@@ -2,6 +2,10 @@
 
 This MVP runs a lightweight backend with Server-Sent Events (SSE) and a simple frontend dashboard that updates automatically.
 
+## Quick Start (Local)
+```bash
+npm install
+node server.js
 ```
 Open http://localhost:3000 to view the live dashboard.
 
@@ -44,4 +48,4 @@ You can expose a local OpenAI-compatible endpoint and point `OLLAMA_URL` to it (
 
 ## Notes
 - This MVP is intentionally minimal for speed and clarity.
-- The backend is `server.js` and the UI is in `public/index.html`.
+- The backend is `server.js` and the UI is in `public/index.html` (served as static HTML for the demo).
