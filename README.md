@@ -1,6 +1,7 @@
 # Autonomous Markets Control Deck
 
 ## Goal
+
 Build a step-by-step, capital-efficient trading startup that ingests data from major exchanges and platforms (e.g., Nasdaq and large marketplaces), analyzes global market conditions, and executes disciplined buy/sell decisions. The initial objective is to prove profitability with tiny capital (start at $10, target ~$1/week), then scale cautiously as performance and risk controls mature.
 
 ## Tech Stack
@@ -12,6 +13,7 @@ Build a step-by-step, capital-efficient trading startup that ingests data from m
 - **Ollama (optional)**: Free, local LLM runtime for summarization.
 
 ## Business Context
+
 - **Use case**: Automated trading that turns small capital into consistent, measurable gains.
 - **Value**: Stepwise growth, tight risk controls, and transparent decision logic while learning from real market data.
 - **Audience**: Builders and early operators focused on compounding returns from small starting balances.
