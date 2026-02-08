@@ -1,7 +1,8 @@
 # Autonomous Markets Control Deck
 
 ## Goal
-Build a local-first, fully automated system that monitors global market signals, summarizes macro context with an optional local LLM, and streams a risk-aware portfolio stance to a realtime dashboard.
+
+Build a step-by-step, capital-efficient trading startup that ingests data from major exchanges and platforms (e.g., Nasdaq and large marketplaces), analyzes global market conditions, and executes disciplined buy/sell decisions. The initial objective is to prove profitability with tiny capital (start at $10, target ~$1/week), then scale cautiously as performance and risk controls mature.
 
 ## Tech Stack
 - **Next.js + React**: Frontend framework and UI rendering.
@@ -12,9 +13,10 @@ Build a local-first, fully automated system that monitors global market signals,
 - **Ollama (optional)**: Free, local LLM runtime for summarization.
 
 ## Business Context
-- **Use case**: Automated market intelligence and portfolio guidance.
-- **Value**: Continuous, explainable signals with disciplined risk framing.
-- **Audience**: Founders, PMs, and investment teams needing a clear, live operational view.
+
+- **Use case**: Automated trading that turns small capital into consistent, measurable gains.
+- **Value**: Stepwise growth, tight risk controls, and transparent decision logic while learning from real market data.
+- **Audience**: Builders and early operators focused on compounding returns from small starting balances.
 
 ## App Start Guide
 ### Option A: Local Node
