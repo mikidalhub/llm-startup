@@ -1,0 +1,10 @@
+services:
+  mvp:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      UPDATE_INTERVAL_MS: 5000
+      LLM_PROVIDER: mock
+      OLLAMA_URL: http://host.docker.internal:11434/api/generate
