@@ -2,13 +2,6 @@
 
 This MVP runs a lightweight backend with Server-Sent Events (SSE) and a simple frontend dashboard that updates automatically.
 
-## Quick Start (Local)
-```bash
-npm install
-node server.js
-```
-Open http://localhost:3000 to view the live dashboard.
-
 ## Quick Start (Docker)
 ```bash
 docker compose up --build
