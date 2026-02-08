@@ -19,7 +19,6 @@ Build a local-first, fully automated system that monitors global market signals,
 ## App Start Guide
 ### Option A: Local Node
 ```bash
-git checkout feature/project-readme
 npm install
 node server.js
 ```
@@ -27,7 +26,6 @@ Open **http://localhost:3000** to view the live dashboard.
 
 ### Option B: Docker
 ```bash
-git checkout feature/project-readme
 docker compose up --build
 ```
 Open **http://localhost:3000** to view the live dashboard.
