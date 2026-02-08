@@ -157,6 +157,27 @@
         border: 1px solid rgba(148, 163, 184, 0.2);
         box-shadow: 0 0 40px rgba(56, 189, 248, 0.2);
       }
+      .ring-arrows {
+        position: absolute;
+        inset: 8%;
+        width: 84%;
+        height: 84%;
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      .ring-arrows path {
+        stroke: rgba(148, 163, 184, 0.7);
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-dasharray: 6 8;
+        animation: dash 6s linear infinite;
+      }
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -28;
+        }
+      }
       .monitoring-ring::before {
         content: "";
         position: absolute;
@@ -175,6 +196,15 @@
         padding: 12px;
         border: 1px solid rgba(148, 163, 184, 0.2);
         backdrop-filter: blur(8px);
+      }
+      .ring-center::after {
+        content: "";
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        box-shadow: 0 0 18px rgba(56, 189, 248, 0.35);
+        pointer-events: none;
       }
       .ring-center h3 {
         margin: 0;
@@ -293,6 +323,17 @@
           <p class="muted">Follow the live decision cycle at a glance.</p>
           <div class="monitoring-ring" aria-live="polite">
             <div class="glow-line"></div>
+            <svg class="ring-arrows" viewBox="0 0 200 200" aria-hidden="true">
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" fill="rgba(148, 163, 184, 0.8)" />
+                </marker>
+              </defs>
+              <path d="M100 10 A90 90 0 0 1 186 80" marker-end="url(#arrowhead)" />
+              <path d="M190 110 A90 90 0 0 1 130 186" marker-end="url(#arrowhead)" />
+              <path d="M100 190 A90 90 0 0 1 20 120" marker-end="url(#arrowhead)" />
+              <path d="M10 90 A90 90 0 0 1 70 14" marker-end="url(#arrowhead)" />
+            </svg>
             <div class="ring-center">
               <h3 id="ring-status-title">Pipeline Live</h3>
               <p id="ring-status-detail">Awaiting updates...</p>
