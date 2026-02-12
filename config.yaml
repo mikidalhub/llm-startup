@@ -1,0 +1,13 @@
+symbols:
+  - AAPL
+  - BTC-USD
+pollIntervalSeconds: 60
+capital: 10000
+maxPositionPct: 0.1
+rsiPeriod: 14
+historyPoints: 80
+llm:
+  provider: mock
+  model: llama3.1:8b
+  url: http://host.docker.internal:11434/api/chat
+outputPath: ./results.json

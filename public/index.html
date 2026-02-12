@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Market Autopilot Control Deck</title>
+    <title>LLM Startup</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -137,15 +137,19 @@
         display: grid;
         gap: 10px;
       }
-      .timeline {
-        display: grid;
-        gap: 12px;
+      .table-wrap {
+        overflow-x: auto;
       }
-      .timeline-item {
-        display: grid;
-        gap: 4px;
-        border-left: 2px solid #1f2937;
-        padding-left: 12px;
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 7px;
+        border-bottom: 1px solid #1f2937;
+        text-align: left;
       }
       .monitoring-ring {
         position: relative;
@@ -305,22 +309,21 @@
     <main>
       <section class="hero">
         <div class="hero-card">
-          <h1>Autonomous Markets Control Deck</h1>
-          <p class="muted">Continuous global signal synthesis with automated portfolio biasing.</p>
+          <h1>LLM Startup</h1>
+          <p class="muted">Glassmorphism live control deck for autonomous mock trading.</p>
           <p class="callout">
-            Architecture: A single Node service generates market + macro signals, runs a decision/risk pass, and emits
-            SSE events that the UI renders in real time. The frontend is a static dashboard that listens to the stream
-            and refreshes without user input.
+            Plan consistency: each loop runs <strong>ingestion → indicators → LLM decision → execution → metrics →
+            persist/SSE</strong>. The circle tracker maps 1:1 to this runtime flow and highlights the currently active step.
           </p>
           <div class="hero-meta">
             <span class="chip"><span class="pulse"></span> Live stream</span>
-            <span class="chip">SSE updates</span>
-            <span class="chip">No user actions</span>
+            <span class="chip">Mock + Ollama modes</span>
+            <span class="chip">No manual refresh</span>
           </div>
         </div>
         <div class="hero-card monitoring-card">
           <h2>Realtime Monitoring Ring</h2>
-          <p class="muted">Follow the live decision cycle at a glance.</p>
+          <p class="muted">Step tracker is now aligned to the current trading engine.</p>
           <div class="monitoring-ring" aria-live="polite">
             <div class="glow-line"></div>
             <svg class="ring-arrows" viewBox="0 0 200 200" aria-hidden="true">
@@ -338,152 +341,170 @@
               <h3 id="ring-status-title">Pipeline Live</h3>
               <p id="ring-status-detail">Awaiting updates...</p>
             </div>
-            <div class="ring-step step-0" data-step="0">
-              <span>Ingestion</span>
-              <small>Markets + macro</small>
-            </div>
-            <div class="ring-step step-1" data-step="1">
-              <span>Feature</span>
-              <small>Indicators</small>
-            </div>
-            <div class="ring-step step-2" data-step="2">
-              <span>LLM</span>
-              <small>Macro summary</small>
-            </div>
-            <div class="ring-step step-3" data-step="3">
-              <span>Decision</span>
-              <small>Portfolio bias</small>
-            </div>
-            <div class="ring-step step-4" data-step="4">
-              <span>Risk</span>
-              <small>Constraint check</small>
-            </div>
-            <div class="ring-step step-5" data-step="5">
-              <span>Execution</span>
-              <small>Trade plan</small>
-            </div>
+            <div class="ring-step step-0" data-step="0"><span>Ingestion</span><small>Yahoo candles</small></div>
+            <div class="ring-step step-1" data-step="1"><span>Feature</span><small>RSI + volume</small></div>
+            <div class="ring-step step-2" data-step="2"><span>LLM</span><small>BUY/SELL/HOLD</small></div>
+            <div class="ring-step step-3" data-step="3"><span>Execution</span><small>Mock fill</small></div>
+            <div class="ring-step step-4" data-step="4"><span>Risk</span><small>Size clamp</small></div>
+            <div class="ring-step step-5" data-step="5"><span>Persist</span><small>JSON + SSE</small></div>
           </div>
         </div>
       </section>
+
       <div class="grid">
         <section class="card">
-          <h2>LLM Context</h2>
-          <div class="row">
-            <div id="llm-provider" class="tag">provider</div>
-            <div class="tag">Source: <span id="llm-source">-</span></div>
-          </div>
-          <p id="llm-summary" class="muted">Waiting for signal...</p>
-        </section>
-        <section class="card">
-          <h2>Macro Signals</h2>
+          <h2>Portfolio Metrics</h2>
           <ul>
-            <li><strong>Inflation:</strong> <span id="macro-inflation">-</span></li>
-            <li><strong>Rates:</strong> <span id="macro-rates">-</span></li>
-            <li><strong>Growth:</strong> <span id="macro-growth">-</span></li>
+            <li><strong>Value:</strong> <span id="portfolio-value">-</span></li>
+            <li><strong>Cash:</strong> <span id="portfolio-cash">-</span></li>
+            <li><strong>P&amp;L:</strong> <span id="portfolio-pnl">-</span></li>
+            <li><strong>Return:</strong> <span id="portfolio-return">-</span></li>
+            <li><strong>Win Rate:</strong> <span id="portfolio-win">-</span></li>
+            <li><strong>Sharpe:</strong> <span id="portfolio-sharpe">-</span></li>
           </ul>
         </section>
+
         <section class="card">
-          <h2>Decision Engine</h2>
+          <h2>Engine Config</h2>
           <ul>
-            <li><strong>Bias:</strong> <span id="decision-bias">-</span></li>
-            <li><strong>Risk Score:</strong> <span id="decision-risk">-</span></li>
-            <li><strong>Preferred Region:</strong> <span id="decision-region">-</span></li>
+            <li><strong>Symbols:</strong> <span id="cfg-symbols">-</span></li>
+            <li><strong>Poll:</strong> <span id="cfg-poll">-</span></li>
+            <li><strong>Capital:</strong> <span id="cfg-capital">-</span></li>
+            <li><strong>Max Position:</strong> <span id="cfg-max-position">-</span></li>
+            <li><strong>LLM:</strong> <span id="cfg-llm">-</span></li>
           </ul>
         </section>
+
         <section class="card">
-          <h2>Markets Snapshot</h2>
-          <ul id="markets-list"></ul>
-        </section>
-        <section class="card">
-          <h2>Target Allocation</h2>
-          <ul id="allocation-list"></ul>
-        </section>
-        <section class="card">
-          <h2>Status</h2>
+          <h2>Execution Plan</h2>
           <div class="status-card">
-            <p class="muted">Last update: <span id="last-updated">-</span></p>
+            <p class="muted">Loop status: <span id="loop-status">running</span></p>
             <p class="muted">SSE connection: <span id="connection-status">connecting...</span></p>
-            <p class="muted">Update cadence: <span id="update-cadence">-</span></p>
+            <p class="muted">Cadence: <span id="update-cadence">-</span></p>
+            <p class="muted">Last update: <span id="last-updated">-</span></p>
+            <p class="muted">Errors: <span id="runtime-error">none</span></p>
           </div>
+        </section>
+
+        <section class="card">
+          <h2>Market Snapshots</h2>
+          <ul id="snapshots-list"></ul>
         </section>
       </div>
+
+      <section class="card" style="margin-top: 20px">
+        <h2>Recent Trades</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Size %</th>
+                <th>Shares</th>
+                <th>Price</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
+      </section>
     </main>
+
     <script>
       const setText = (id, value) => {
         const el = document.getElementById(id);
-        if (el) el.textContent = value ?? "-";
+        if (el) el.textContent = value ?? '-';
       };
 
-      const renderList = (id, items, formatter) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.innerHTML = "";
-        items.forEach((item) => {
-          const li = document.createElement("li");
-          li.textContent = formatter(item);
-          el.appendChild(li);
-        });
-      };
+      const money = (value) =>
+        Number(value || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
-      const updateUI = (state) => {
-        setText("last-updated", new Date(state.timestamp).toLocaleTimeString());
-        setText("macro-inflation", state.macro.inflationTrend);
-        setText("macro-rates", state.macro.ratesOutlook);
-        setText("macro-growth", state.macro.growthSignal);
-        setText("decision-bias", state.decision.bias);
-        setText("decision-risk", `${state.decision.riskScore}/100`);
-        setText("decision-region", state.decision.preferredRegion);
-        setText("llm-provider", state.llm.provider);
-        setText("llm-summary", state.llm.summary);
-        setText("llm-source", state.llm.provider === "ollama" ? "Local Ollama" : "Mock engine");
-
-        renderList("markets-list", state.markets, (market) =>
-          `${market.region} (${market.index}): ${market.dailyChangePct}% | momentum ${market.momentumScore} | vol ${market.volatilityScore}`
-        );
-        renderList("allocation-list", state.decision.allocation, (allocation) =>
-          `${allocation.sleeve}: ${allocation.targetPct}%`
-        );
-      };
-
-      const connectionStatus = document.getElementById("connection-status");
-      const source = new EventSource("/events");
-      const cadence = document.getElementById("update-cadence");
-      const ringTitle = document.getElementById("ring-status-title");
-      const ringDetail = document.getElementById("ring-status-detail");
-      const ringSteps = Array.from(document.querySelectorAll(".ring-step"));
-
-      let lastEvent = null;
-      let activeStep = 0;
+      const pct = (value) => `${Number(value || 0).toFixed(2)}%`;
 
       const setActiveStep = (index) => {
-        ringSteps.forEach((step) => step.classList.remove("active"));
+        const ringSteps = Array.from(document.querySelectorAll('.ring-step'));
+        const ringTitle = document.getElementById('ring-status-title');
+        const ringDetail = document.getElementById('ring-status-detail');
+        ringSteps.forEach((step) => step.classList.remove('active'));
         const active = ringSteps.find((step) => Number(step.dataset.step) === index);
         if (active) {
-          active.classList.add("active");
-          ringTitle.textContent = active.querySelector("span").textContent;
-          ringDetail.textContent = active.querySelector("small").textContent;
+          active.classList.add('active');
+          ringTitle.textContent = active.querySelector('span').textContent;
+          ringDetail.textContent = active.querySelector('small').textContent;
         }
       };
 
-      source.addEventListener("state", (event) => {
-        const data = JSON.parse(event.data);
-        updateUI(data);
-        activeStep = (activeStep + 1) % ringSteps.length;
+      const render = (state) => {
+        const metrics = state.portfolio?.metrics || {};
+        const cfg = state.config || {};
+
+        setText('portfolio-value', money(metrics.portfolioValue));
+        setText('portfolio-cash', money(state.portfolio?.cash));
+        setText('portfolio-pnl', money(metrics.pnl));
+        setText('portfolio-return', pct(metrics.returnPct));
+        setText('portfolio-win', pct(metrics.winRate));
+        setText('portfolio-sharpe', Number(metrics.sharpe || 0).toFixed(2));
+
+        setText('cfg-symbols', (cfg.symbols || []).join(', '));
+        setText('cfg-poll', `${cfg.pollIntervalSeconds ?? '-'}s`);
+        setText('cfg-capital', money(cfg.capital));
+        setText('cfg-max-position', pct((cfg.maxPositionPct || 0) * 100));
+        setText('cfg-llm', `${cfg.llm?.provider || 'mock'} (${cfg.llm?.model || 'n/a'})`);
+
+        setText('last-updated', new Date(state.timestamp).toLocaleTimeString());
+        setText('runtime-error', state.lastError || 'none');
+        setText('loop-status', state.lastError ? 'degraded (fallback active)' : 'running');
+
+        const snapshotsList = document.getElementById('snapshots-list');
+        const snapshots = Object.values(state.snapshots || {});
+        snapshotsList.innerHTML = snapshots.length
+          ? snapshots
+              .map(
+                (s) =>
+                  `<li><strong>${s.symbol}</strong> · price ${money(s.price)} · vol ${Number(s.volume || 0).toLocaleString()} · RSI ${s.rsi}${s.source ? ` · ${s.source}` : ''}</li>`
+              )
+              .join('')
+          : '<li class="muted">No snapshots yet.</li>';
+
+        const rows = (state.portfolio?.trades || []).slice(-20).reverse();
+        document.getElementById('trades-body').innerHTML = rows
+          .map(
+            (t) =>
+              `<tr><td>${new Date(t.ts).toLocaleTimeString()}</td><td>${t.symbol}</td><td>${t.action}</td><td>${t.status}</td><td>${pct((t.sizePct || 0) * 100)}</td><td>${Number(t.shares || 0).toFixed(6)}</td><td>${money(t.price)}</td><td>${t.reason}</td></tr>`
+          )
+          .join('');
+      };
+
+      let activeStep = 0;
+      let lastEvent = null;
+      setActiveStep(activeStep);
+
+      const connectionStatus = document.getElementById('connection-status');
+      const cadence = document.getElementById('update-cadence');
+      const source = new EventSource('/events');
+
+      source.addEventListener('state', (event) => {
+        const state = JSON.parse(event.data);
+        render(state);
+        activeStep = (activeStep + 1) % 6;
         setActiveStep(activeStep);
         if (lastEvent) {
-          const diffSeconds = Math.round((Date.now() - lastEvent) / 1000);
-          cadence.textContent = `${diffSeconds}s`;
+          const diff = Math.round((Date.now() - lastEvent) / 1000);
+          cadence.textContent = `${diff}s`;
         }
         lastEvent = Date.now();
       });
 
-      source.addEventListener("open", () => {
-        connectionStatus.textContent = "connected";
-        setActiveStep(activeStep);
+      source.addEventListener('open', () => {
+        connectionStatus.textContent = 'connected';
       });
 
-      source.addEventListener("error", () => {
-        connectionStatus.textContent = "disconnected";
+      source.addEventListener('error', () => {
+        connectionStatus.textContent = 'disconnected';
       });
     </script>
   </body>
