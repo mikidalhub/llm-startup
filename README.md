@@ -1,39 +1,47 @@
 # Autonomous Markets Control Deck
 
-## Goal
+A single-container Node app that runs a live, LLM-assisted **mock trading engine** and serves a dashboard.
 
-Build a step-by-step, capital-efficient trading startup that ingests data from major exchanges and platforms (e.g., Nasdaq and large marketplaces), analyzes global market conditions, and executes disciplined buy/sell decisions. The initial objective is to prove profitability with tiny capital (start at $10, target ~$1/week), then scale cautiously as performance and risk controls mature.
+## What this now does
+- Live ingestion from Yahoo Finance every 1-5+ minutes (configurable) for symbols like `AAPL` and `BTC-USD`.
+- RSI(14) signal generation from 5m candles.
+- LLM decision hook (Ollama optional) with strict `BUY | SELL | HOLD` + `size_pct` output.
+- Mock portfolio execution with virtual capital and persisted trade history.
+- Performance metrics: portfolio value, P&L, return %, win rate, Sharpe.
+- Output persisted to `results.json` for external polling/UI integrations.
 
-## Tech Stack
-- **Next.js + React**: Frontend framework and UI rendering.
-- **MUI (Material UI)** + **Emotion**: UI component system and styling.
-- **Node.js**: Single service backend that generates the demo state and emits Server-Sent Events.
-- **SSE (Server-Sent Events)**: Pushes live updates to the UI without user input.
-- **Docker**: Optional containerization for portable runs.
-- **Ollama (optional)**: Free, local LLM runtime for summarization.
-
-## Business Context
-- **Use case**: Automated trading that turns small capital into consistent, measurable gains.
-- **Value**: Stepwise growth, tight risk controls, and transparent decision logic while learning from real market data.
-- **Audience**: Builders and early operators focused on compounding returns from small starting balances.
-
-## App Start Guide
-### Option A: Local Node
-```bash
-npm install
-node server.js
-```
-Open **http://localhost:3000** to view the live dashboard.
-
-### Option B: Docker
+## Quick start (Docker)
 ```bash
 docker compose up --build
 ```
-Open **http://localhost:3000** to view the live dashboard.
+Then open `http://localhost:3000`.
 
-### Optional: Local LLM (Ollama)
-```bash
-ollama pull llama3
-LLM_PROVIDER=ollama docker compose up --build
-```
-The UI will display **Local Ollama** as the LLM source when enabled.
+## Optional local Ollama
+1. Install Ollama and pull model:
+   ```bash
+   ollama pull llama3.1:8b
+   ```
+2. Run with Ollama decisions:
+   ```bash
+   LLM_PROVIDER=ollama docker compose up --build
+   ```
+
+## Runtime endpoints
+- `GET /api/state` full engine state.
+- `GET /trades` latest trades.
+- `GET /portfolio` portfolio summary.
+- `GET /events` SSE stream.
+
+## Config
+Edit `config.yaml`:
+- `symbols`
+- `pollIntervalSeconds`
+- `capital`
+- `maxPositionPct`
+- `rsiPeriod`
+- `llm.provider` (`mock` or `ollama`)
+- `llm.model`
+- `llm.url`
+- `outputPath`
+
+No cloud dependencies are required for the default (`mock`) mode.
