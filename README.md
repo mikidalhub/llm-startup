@@ -1,38 +1,66 @@
 # Autonomous Markets Control Deck
 
-A single-container Node app that runs a live, LLM-assisted **mock trading engine** and serves a dashboard.
+A Node.js app that runs a mock trading engine and serves a lightweight dashboard + APIs.
 
-## What this now does
-- Live ingestion from Yahoo Finance every 1-5+ minutes (configurable) for symbols like `AAPL` and `BTC-USD`.
-- RSI(14) signal generation from 5m candles.
-- LLM decision hook (Ollama optional) with strict `BUY | SELL | HOLD` + `size_pct` output.
-- Mock portfolio execution with virtual capital and persisted trade history.
-- Performance metrics: portfolio value, P&L, return %, win rate, Sharpe.
-- Output persisted to `results.json` for external polling/UI integrations.
+## Feature summary
+- **Live market polling** from Yahoo Finance (`AAPL`, `BTC-USD`, or custom symbols).
+- **Signal generation** using RSI.
+- **Decision layer** via:
+  - deterministic mock strategy (default), or
+  - Ollama JSON decisions.
+- **Portfolio simulator** with virtual cash, positions, and trade history.
+- **Metrics**: portfolio value, P&L, return %, win rate, Sharpe.
+- **Streaming + APIs**: SSE events and JSON endpoints.
+- **Persistence** to `results.json` for easy integration.
 
-## Quick start (Docker)
+## Project structure
+- `server.js`: app bootstrap (load config, start engine, start HTTP server).
+- `app-server.js`: HTTP routing layer and SSE wiring.
+- `trading-engine.js`: market fetch, decisioning, execution, and metrics.
+- `public/index.html`: dashboard UI.
+- `tests/unit`: unit tests for engine and API server.
+- `config.yaml`: runtime configuration.
+
+## Clone and run locally
+### 1) Clone
+```bash
+git clone <your-repo-url>
+cd llm-startup
+```
+
+### 2) Install dependencies
+```bash
+npm install
+```
+
+### 3) Start locally
+```bash
+node server.js
+```
+Open: `http://localhost:3000`
+
+## Run with Docker
 ```bash
 docker compose up --build
 ```
-Then open `http://localhost:3000`.
 
-## Optional local Ollama
-1. Install Ollama and pull model:
+## Optional: enable Ollama decisions
+1. Install Ollama and pull a model:
    ```bash
    ollama pull llama3.1:8b
    ```
-2. Run with Ollama decisions:
+2. Start with Ollama provider:
    ```bash
-   LLM_PROVIDER=ollama docker compose up --build
+   LLM_PROVIDER=ollama node server.js
    ```
 
-## Runtime endpoints
-- `GET /api/state` full engine state.
-- `GET /trades` latest trades.
-- `GET /portfolio` portfolio summary.
-- `GET /events` SSE stream.
+## API endpoints
+- `GET /api/state` → full engine state.
+- `GET /trades` → latest 50 trades.
+- `GET /portfolio` → cash, positions, metrics.
+- `GET /events` → SSE stream of state updates.
 
-## Config
+## Configuration
 Edit `config.yaml`:
 - `symbols`
 - `pollIntervalSeconds`
@@ -44,4 +72,24 @@ Edit `config.yaml`:
 - `llm.url`
 - `outputPath`
 
-No cloud dependencies are required for the default (`mock`) mode.
+## Development checks
+```bash
+npm test
+```
+
+For browser e2e checks (requires Playwright browsers):
+```bash
+npm run test:e2e
+```
+
+## Maintainability and testability notes
+- Server concerns are separated from engine logic.
+- Trading engine supports dependency injection for:
+  - network requests,
+  - file writes,
+  - clock/time generation.
+- Unit tests cover:
+  - RSI + parser utilities,
+  - fallback behavior,
+  - trade execution,
+  - API endpoints.
