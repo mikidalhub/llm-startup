@@ -67,6 +67,7 @@ Edit `config.yaml`:
 - `capital`
 - `maxPositionPct`
 - `rsiPeriod`
+- `scannerUniverse`
 - `llm.provider` (`mock` or `ollama`)
 - `llm.model`
 - `llm.url`
