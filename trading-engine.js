@@ -38,13 +38,15 @@ const calculateRSI = (closes, period = 14) => {
   return Number((100 - 100 / (1 + rs)).toFixed(2));
 };
 
-const parseJsonBlock = (rawText) => {
+export const parseJsonBlock = (rawText) => {
   if (!rawText) return null;
+
   try {
     return JSON.parse(rawText);
   } catch {
     const match = rawText.match(/\{[\s\S]*\}/);
     if (!match) return null;
+
     try {
       return JSON.parse(match[0]);
     } catch {
@@ -62,6 +64,7 @@ const buildFallbackDecision = (snapshot) => {
 export const loadConfig = async (configPath = 'config.yaml') => {
   const file = await readFile(configPath, 'utf-8');
   const parsed = yaml.load(file);
+
   return {
     symbols: parsed.symbols ?? ['AAPL'],
     pollIntervalSeconds: Number(parsed.pollIntervalSeconds ?? 60),
@@ -79,13 +82,17 @@ export const loadConfig = async (configPath = 'config.yaml') => {
 };
 
 export class TradingEngine {
-  constructor(config) {
+  constructor(config, dependencies = {}) {
     this.config = config;
+    this.fetchFn = dependencies.fetchFn ?? fetch;
+    this.writeFileFn = dependencies.writeFileFn ?? writeFile;
+    this.clock = dependencies.clock ?? (() => new Date().toISOString());
+
     this.portfolio = {
       cash: config.capital,
       positions: {},
       trades: [],
-      equityCurve: [{ ts: new Date().toISOString(), value: config.capital }],
+      equityCurve: [{ ts: this.clock(), value: config.capital }],
       metrics: { pnl: 0, returnPct: 0, winRate: 0, sharpe: 0 }
     };
     this.snapshots = {};
@@ -132,7 +139,7 @@ export class TradingEngine {
     if (this.config.llm.provider !== 'ollama') return buildFallbackDecision(snapshot);
 
     try {
-      const response = await fetch(this.config.llm.url, {
+      const response = await this.fetchFn(this.config.llm.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: this.config.llm.model, stream: false, messages: [{ role: 'user', content: prompt }] })
@@ -187,6 +194,7 @@ export class TradingEngine {
       const mark = this.snapshots[symbol]?.price ?? position.avgCost;
       return total + position.shares * mark;
     }, 0);
+
     return Number((this.portfolio.cash + positionValue).toFixed(2));
   }
 
@@ -423,5 +431,3 @@ export class TradingEngine {
     return { timestamp: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError };
   }
 }
-
-export { calculateRSI };

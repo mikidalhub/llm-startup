@@ -1,17 +1,8 @@
-import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
 import { TradingEngine, loadConfig } from './trading-engine.js';
+import { createServer } from './app-server.js';
 
 const PORT = process.env.PORT || 3000;
 const publicDir = new URL('./public/', import.meta.url);
-
-const contentTypes = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8'
-};
 
 const config = await loadConfig(process.env.CONFIG_PATH || 'config.yaml');
 if (process.env.LLM_PROVIDER) config.llm.provider = process.env.LLM_PROVIDER;
@@ -101,3 +92,11 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
+
+const shutdown = () => {
+  engine.stop();
+  server.close(() => process.exit(0));
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

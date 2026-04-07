@@ -11,20 +11,45 @@ A single-container Node app that runs a live, LLM-assisted **mock trading engine
 - Beginner mode traffic lights (Green/Yellow/Red) for Value, Quality, Risk, and Income.
 - Output persisted to `results.json` for external polling/UI integrations.
 
-## Quick start (Docker)
+## Project structure
+- `server.js`: app bootstrap (load config, start engine, start HTTP server).
+- `app-server.js`: HTTP routing layer and SSE wiring.
+- `trading-engine.js`: market fetch, decisioning, execution, and metrics.
+- `public/index.html`: dashboard UI.
+- `tests/unit`: unit tests for engine and API server.
+- `config.yaml`: runtime configuration.
+
+## Clone and run locally
+### 1) Clone
+```bash
+git clone <your-repo-url>
+cd llm-startup
+```
+
+### 2) Install dependencies
+```bash
+npm install
+```
+
+### 3) Start locally
+```bash
+node server.js
+```
+Open: `http://localhost:3000`
+
+## Run with Docker
 ```bash
 docker compose up --build
 ```
-Then open `http://localhost:3000`.
 
-## Optional local Ollama
-1. Install Ollama and pull model:
+## Optional: enable Ollama decisions
+1. Install Ollama and pull a model:
    ```bash
    ollama pull llama3.1:8b
    ```
-2. Run with Ollama decisions:
+2. Start with Ollama provider:
    ```bash
-   LLM_PROVIDER=ollama docker compose up --build
+   LLM_PROVIDER=ollama node server.js
    ```
 
 ## Runtime endpoints
@@ -39,7 +64,7 @@ Then open `http://localhost:3000`.
 - `GET /risk` portfolio-level risk analysis.
 - `GET /daily-brief` auto-generated investor briefing.
 
-## Config
+## Configuration
 Edit `config.yaml`:
 - `symbols`
 - `pollIntervalSeconds`
