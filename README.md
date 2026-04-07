@@ -1,17 +1,15 @@
 # Autonomous Markets Control Deck
 
-A Node.js app that runs a mock trading engine and serves a lightweight dashboard + APIs.
+A single-container Node app that runs a live, LLM-assisted **mock trading engine** and now includes a **beginner-friendly value investing intelligence layer**.
 
-## Feature summary
-- **Live market polling** from Yahoo Finance (`AAPL`, `BTC-USD`, or custom symbols).
-- **Signal generation** using RSI.
-- **Decision layer** via:
-  - deterministic mock strategy (default), or
-  - Ollama JSON decisions.
-- **Portfolio simulator** with virtual cash, positions, and trade history.
-- **Metrics**: portfolio value, P&L, return %, win rate, Sharpe.
-- **Streaming + APIs**: SSE events and JSON endpoints.
-- **Persistence** to `results.json` for easy integration.
+## What this now does
+- Live ingestion from Yahoo Finance every 1-5+ minutes (configurable) for symbols like `AAPL` and `BTC-USD`.
+- RSI(14) signal generation from 5m candles for the simulation loop.
+- LLM decision hook (Ollama optional) with strict `BUY | SELL | HOLD` + `size_pct` output.
+- Mock portfolio execution with virtual capital and persisted trade history.
+- Value-investing analysis modules for fundamentals, value, risk, dividends, portfolio health, and explanations.
+- Beginner mode traffic lights (Green/Yellow/Red) for Value, Quality, Risk, and Income.
+- Output persisted to `results.json` for external polling/UI integrations.
 
 ## Project structure
 - `server.js`: app bootstrap (load config, start engine, start HTTP server).
@@ -54,11 +52,17 @@ docker compose up --build
    LLM_PROVIDER=ollama node server.js
    ```
 
-## API endpoints
-- `GET /api/state` → full engine state.
-- `GET /trades` → latest 50 trades.
-- `GET /portfolio` → cash, positions, metrics.
-- `GET /events` → SSE stream of state updates.
+## Runtime endpoints
+- `GET /api/state` full engine state.
+- `GET /trades` latest trades.
+- `GET /portfolio` portfolio summary.
+- `GET /events` SSE stream.
+- `GET /opportunities` ranked long-term opportunities from scanner universes.
+- `GET /company/:ticker` company health card.
+- `GET /analysis/:ticker` beginner-focused analysis summary.
+- `GET /dividends` portfolio dividend income projection.
+- `GET /risk` portfolio-level risk analysis.
+- `GET /daily-brief` auto-generated investor briefing.
 
 ## Configuration
 Edit `config.yaml`:
@@ -73,24 +77,4 @@ Edit `config.yaml`:
 - `llm.url`
 - `outputPath`
 
-## Development checks
-```bash
-npm test
-```
-
-For browser e2e checks (requires Playwright browsers):
-```bash
-npm run test:e2e
-```
-
-## Maintainability and testability notes
-- Server concerns are separated from engine logic.
-- Trading engine supports dependency injection for:
-  - network requests,
-  - file writes,
-  - clock/time generation.
-- Unit tests cover:
-  - RSI + parser utilities,
-  - fallback behavior,
-  - trade execution,
-  - API endpoints.
+See `docs/INVESTMENT_PLATFORM_BLUEPRINT.md` for architecture, formulas, UX, and roadmap.

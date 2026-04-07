@@ -11,10 +11,8 @@ import { buildBeginnerView, buildExplanation } from './explainer/investment-expl
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-export const calculateRSI = (closes, period = 14) => {
-  if (closes.length <= period) {
-    return 50;
-  }
+const calculateRSI = (closes, period = 14) => {
+  if (closes.length <= period) return 50;
 
   let gains = 0;
   let losses = 0;
@@ -57,15 +55,9 @@ export const parseJsonBlock = (rawText) => {
   }
 };
 
-export const buildFallbackDecision = (snapshot) => {
-  if (snapshot.rsi < 35) {
-    return { action: 'BUY', size_pct: 0.07, reason: 'RSI indicates oversold conditions.' };
-  }
-
-  if (snapshot.rsi > 70) {
-    return { action: 'SELL', size_pct: 0.07, reason: 'RSI indicates overbought conditions.' };
-  }
-
+const buildFallbackDecision = (snapshot) => {
+  if (snapshot.rsi < 35) return { action: 'BUY', size_pct: 0.07, reason: 'RSI indicates oversold conditions.' };
+  if (snapshot.rsi > 70) return { action: 'SELL', size_pct: 0.07, reason: 'RSI indicates overbought conditions.' };
   return { action: 'HOLD', size_pct: 0, reason: 'Momentum is neutral.' };
 };
 
@@ -121,28 +113,15 @@ export class TradingEngine {
   }
 
   async fetchSymbolSnapshot(symbol) {
-    const endpoint = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m`;
-    const response = await this.fetchFn(endpoint);
-    if (!response.ok) {
-      throw new Error(`Yahoo request failed for ${symbol}: ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const result = payload?.chart?.result?.[0];
-    const quote = result?.indicators?.quote?.[0];
-    const closes = (quote?.close || []).map(Number).filter(Number.isFinite);
-    const volumes = (quote?.volume || []).map(Number).filter(Number.isFinite);
-
-    if (closes.length < this.config.rsiPeriod + 1) {
-      throw new Error(`Not enough price history for ${symbol}`);
-    }
+    const chart = await this.yahoo.getChart(symbol, { range: '1d', interval: '5m' });
+    if (chart.closes.length < this.config.rsiPeriod + 1) throw new Error(`Not enough price history for ${symbol}`);
 
     return {
       symbol,
-      price: closes.at(-1),
-      volume: volumes.at(-1) ?? 0,
-      rsi: calculateRSI(closes.slice(-(this.config.rsiPeriod + 25)), this.config.rsiPeriod),
-      ts: this.clock()
+      price: chart.closes.at(-1),
+      volume: chart.volumes.at(-1) ?? 0,
+      rsi: calculateRSI(chart.closes.slice(-(this.config.rsiPeriod + 25)), this.config.rsiPeriod),
+      ts: new Date().toISOString()
     };
   }
 
@@ -150,14 +129,7 @@ export class TradingEngine {
     const lastPrice = this.snapshots[symbol]?.price ?? 100;
     const drift = 1 + (Math.random() - 0.5) * 0.01;
     const price = Number((lastPrice * drift).toFixed(2));
-    return {
-      symbol,
-      price,
-      volume: this.snapshots[symbol]?.volume ?? 0,
-      rsi: this.snapshots[symbol]?.rsi ?? 50,
-      ts: this.clock(),
-      source: 'synthetic-fallback'
-    };
+    return { symbol, price, volume: this.snapshots[symbol]?.volume ?? 0, rsi: this.snapshots[symbol]?.rsi ?? 50, ts: new Date().toISOString(), source: 'synthetic-fallback' };
   }
 
   async llmDecide(snapshot) {
@@ -212,17 +184,7 @@ export class TradingEngine {
       }
     }
 
-    const trade = {
-      ts: this.clock(),
-      symbol,
-      action,
-      status,
-      sizePct,
-      shares: Number(shares.toFixed(6)),
-      price,
-      reason: decision.reason || 'No reason supplied'
-    };
-
+    const trade = { ts: new Date().toISOString(), symbol, action, status, sizePct, shares: Number(shares.toFixed(6)), price: snapshot.price, reason: decision.reason || 'No reason supplied' };
     this.portfolio.trades.push(trade);
     if (this.portfolio.trades.length > 300) this.portfolio.trades = this.portfolio.trades.slice(-300);
   }
@@ -320,14 +282,10 @@ export class TradingEngine {
   async getOpportunities() {
     const universe = Object.values(this.config.scannerUniverse).flat();
     const unique = [...new Set(universe)].slice(0, 30);
-    const cards = [];
-    for (const symbol of unique) {
-      try {
-        cards.push(await this.buildCompanyCard(symbol));
-      } catch {
-        // continue scanning
-      }
-    }
+    const settled = await Promise.allSettled(unique.map((symbol) => this.buildCompanyCard(symbol)));
+    const cards = settled
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value);
     return rankOpportunities(cards, 12);
   }
 
@@ -412,10 +370,8 @@ export class TradingEngine {
 
   updateMetrics() {
     const portfolioValue = this.getPortfolioValue();
-    this.portfolio.equityCurve.push({ ts: this.clock(), value: portfolioValue });
-    if (this.portfolio.equityCurve.length > 500) {
-      this.portfolio.equityCurve = this.portfolio.equityCurve.slice(-500);
-    }
+    this.portfolio.equityCurve.push({ ts: new Date().toISOString(), value: portfolioValue });
+    if (this.portfolio.equityCurve.length > 500) this.portfolio.equityCurve = this.portfolio.equityCurve.slice(-500);
 
     const pnl = portfolioValue - this.config.capital;
     const returnPct = (pnl / this.config.capital) * 100;
@@ -436,15 +392,7 @@ export class TradingEngine {
   }
 
   async persistResults() {
-    const output = {
-      updatedAt: this.clock(),
-      config: this.config,
-      snapshots: this.snapshots,
-      portfolio: this.portfolio,
-      lastError: this.lastError
-    };
-
-    await this.writeFileFn(this.config.outputPath, JSON.stringify(output, null, 2));
+    await writeFile(this.config.outputPath, JSON.stringify({ updatedAt: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError }, null, 2));
   }
 
   async tick() {
@@ -480,12 +428,6 @@ export class TradingEngine {
   }
 
   getState() {
-    return {
-      timestamp: this.clock(),
-      config: this.config,
-      snapshots: this.snapshots,
-      portfolio: this.portfolio,
-      lastError: this.lastError
-    };
+    return { timestamp: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError };
   }
 }
