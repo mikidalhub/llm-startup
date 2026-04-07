@@ -5,7 +5,10 @@ pollIntervalSeconds: 60
 capital: 10000
 maxPositionPct: 0.1
 rsiPeriod: 14
-historyPoints: 80
+scannerUniverse:
+  sp500: [AAPL, MSFT, JNJ, PG, KO, PEP, XOM, HD]
+  nasdaq100: [AAPL, MSFT, GOOGL, NVDA, ADBE, COST]
+  dividendAristocrats: [KO, PG, JNJ, MMM, CL, PEP]
 llm:
   provider: mock
   model: llama3.1:8b
