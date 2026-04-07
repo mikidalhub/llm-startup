@@ -11,8 +11,10 @@ import { buildBeginnerView, buildExplanation } from './explainer/investment-expl
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-const calculateRSI = (closes, period = 14) => {
-  if (closes.length <= period) return 50;
+export const calculateRSI = (closes, period = 14) => {
+  if (closes.length <= period) {
+    return 50;
+  }
 
   let gains = 0;
   let losses = 0;
@@ -38,13 +40,15 @@ const calculateRSI = (closes, period = 14) => {
   return Number((100 - 100 / (1 + rs)).toFixed(2));
 };
 
-const parseJsonBlock = (rawText) => {
+export const parseJsonBlock = (rawText) => {
   if (!rawText) return null;
+
   try {
     return JSON.parse(rawText);
   } catch {
     const match = rawText.match(/\{[\s\S]*\}/);
     if (!match) return null;
+
     try {
       return JSON.parse(match[0]);
     } catch {
@@ -53,15 +57,22 @@ const parseJsonBlock = (rawText) => {
   }
 };
 
-const buildFallbackDecision = (snapshot) => {
-  if (snapshot.rsi < 35) return { action: 'BUY', size_pct: 0.07, reason: 'RSI indicates oversold conditions.' };
-  if (snapshot.rsi > 70) return { action: 'SELL', size_pct: 0.07, reason: 'RSI indicates overbought conditions.' };
+export const buildFallbackDecision = (snapshot) => {
+  if (snapshot.rsi < 35) {
+    return { action: 'BUY', size_pct: 0.07, reason: 'RSI indicates oversold conditions.' };
+  }
+
+  if (snapshot.rsi > 70) {
+    return { action: 'SELL', size_pct: 0.07, reason: 'RSI indicates overbought conditions.' };
+  }
+
   return { action: 'HOLD', size_pct: 0, reason: 'Momentum is neutral.' };
 };
 
 export const loadConfig = async (configPath = 'config.yaml') => {
   const file = await readFile(configPath, 'utf-8');
   const parsed = yaml.load(file);
+
   return {
     symbols: parsed.symbols ?? ['AAPL'],
     pollIntervalSeconds: Number(parsed.pollIntervalSeconds ?? 60),
@@ -79,13 +90,17 @@ export const loadConfig = async (configPath = 'config.yaml') => {
 };
 
 export class TradingEngine {
-  constructor(config) {
+  constructor(config, dependencies = {}) {
     this.config = config;
+    this.fetchFn = dependencies.fetchFn ?? fetch;
+    this.writeFileFn = dependencies.writeFileFn ?? writeFile;
+    this.clock = dependencies.clock ?? (() => new Date().toISOString());
+
     this.portfolio = {
       cash: config.capital,
       positions: {},
       trades: [],
-      equityCurve: [{ ts: new Date().toISOString(), value: config.capital }],
+      equityCurve: [{ ts: this.clock(), value: config.capital }],
       metrics: { pnl: 0, returnPct: 0, winRate: 0, sharpe: 0 }
     };
     this.snapshots = {};
@@ -106,15 +121,28 @@ export class TradingEngine {
   }
 
   async fetchSymbolSnapshot(symbol) {
-    const chart = await this.yahoo.getChart(symbol, { range: '1d', interval: '5m' });
-    if (chart.closes.length < this.config.rsiPeriod + 1) throw new Error(`Not enough price history for ${symbol}`);
+    const endpoint = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m`;
+    const response = await this.fetchFn(endpoint);
+    if (!response.ok) {
+      throw new Error(`Yahoo request failed for ${symbol}: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const result = payload?.chart?.result?.[0];
+    const quote = result?.indicators?.quote?.[0];
+    const closes = (quote?.close || []).map(Number).filter(Number.isFinite);
+    const volumes = (quote?.volume || []).map(Number).filter(Number.isFinite);
+
+    if (closes.length < this.config.rsiPeriod + 1) {
+      throw new Error(`Not enough price history for ${symbol}`);
+    }
 
     return {
       symbol,
-      price: chart.closes.at(-1),
-      volume: chart.volumes.at(-1) ?? 0,
-      rsi: calculateRSI(chart.closes.slice(-(this.config.rsiPeriod + 25)), this.config.rsiPeriod),
-      ts: new Date().toISOString()
+      price: closes.at(-1),
+      volume: volumes.at(-1) ?? 0,
+      rsi: calculateRSI(closes.slice(-(this.config.rsiPeriod + 25)), this.config.rsiPeriod),
+      ts: this.clock()
     };
   }
 
@@ -122,7 +150,14 @@ export class TradingEngine {
     const lastPrice = this.snapshots[symbol]?.price ?? 100;
     const drift = 1 + (Math.random() - 0.5) * 0.01;
     const price = Number((lastPrice * drift).toFixed(2));
-    return { symbol, price, volume: this.snapshots[symbol]?.volume ?? 0, rsi: this.snapshots[symbol]?.rsi ?? 50, ts: new Date().toISOString(), source: 'synthetic-fallback' };
+    return {
+      symbol,
+      price,
+      volume: this.snapshots[symbol]?.volume ?? 0,
+      rsi: this.snapshots[symbol]?.rsi ?? 50,
+      ts: this.clock(),
+      source: 'synthetic-fallback'
+    };
   }
 
   async llmDecide(snapshot) {
@@ -132,7 +167,7 @@ export class TradingEngine {
     if (this.config.llm.provider !== 'ollama') return buildFallbackDecision(snapshot);
 
     try {
-      const response = await fetch(this.config.llm.url, {
+      const response = await this.fetchFn(this.config.llm.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: this.config.llm.model, stream: false, messages: [{ role: 'user', content: prompt }] })
@@ -177,7 +212,17 @@ export class TradingEngine {
       }
     }
 
-    const trade = { ts: new Date().toISOString(), symbol, action, status, sizePct, shares: Number(shares.toFixed(6)), price: snapshot.price, reason: decision.reason || 'No reason supplied' };
+    const trade = {
+      ts: this.clock(),
+      symbol,
+      action,
+      status,
+      sizePct,
+      shares: Number(shares.toFixed(6)),
+      price,
+      reason: decision.reason || 'No reason supplied'
+    };
+
     this.portfolio.trades.push(trade);
     if (this.portfolio.trades.length > 300) this.portfolio.trades = this.portfolio.trades.slice(-300);
   }
@@ -187,6 +232,7 @@ export class TradingEngine {
       const mark = this.snapshots[symbol]?.price ?? position.avgCost;
       return total + position.shares * mark;
     }, 0);
+
     return Number((this.portfolio.cash + positionValue).toFixed(2));
   }
 
@@ -366,8 +412,10 @@ export class TradingEngine {
 
   updateMetrics() {
     const portfolioValue = this.getPortfolioValue();
-    this.portfolio.equityCurve.push({ ts: new Date().toISOString(), value: portfolioValue });
-    if (this.portfolio.equityCurve.length > 500) this.portfolio.equityCurve = this.portfolio.equityCurve.slice(-500);
+    this.portfolio.equityCurve.push({ ts: this.clock(), value: portfolioValue });
+    if (this.portfolio.equityCurve.length > 500) {
+      this.portfolio.equityCurve = this.portfolio.equityCurve.slice(-500);
+    }
 
     const pnl = portfolioValue - this.config.capital;
     const returnPct = (pnl / this.config.capital) * 100;
@@ -388,7 +436,15 @@ export class TradingEngine {
   }
 
   async persistResults() {
-    await writeFile(this.config.outputPath, JSON.stringify({ updatedAt: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError }, null, 2));
+    const output = {
+      updatedAt: this.clock(),
+      config: this.config,
+      snapshots: this.snapshots,
+      portfolio: this.portfolio,
+      lastError: this.lastError
+    };
+
+    await this.writeFileFn(this.config.outputPath, JSON.stringify(output, null, 2));
   }
 
   async tick() {
@@ -424,8 +480,12 @@ export class TradingEngine {
   }
 
   getState() {
-    return { timestamp: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError };
+    return {
+      timestamp: this.clock(),
+      config: this.config,
+      snapshots: this.snapshots,
+      portfolio: this.portfolio,
+      lastError: this.lastError
+    };
   }
 }
-
-export { calculateRSI };
