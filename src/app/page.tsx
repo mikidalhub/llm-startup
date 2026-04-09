@@ -70,6 +70,11 @@ const processHandlers = [
   { name: 'Execution Handler', state: 'queued', throughput: 'Awaiting trigger', progress: 42 }
 ];
 
+type ProcessEventPayload = {
+  message?: string;
+  type?: string;
+};
+
 const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA?.slice(0, 7) ?? 'local';
 
 const glassCardSx = {
@@ -109,7 +114,7 @@ export default function HomePage() {
       if (inferred !== null) {
         setActiveWheelStep(inferred);
       } else {
-        setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+        setActiveWheelStep((prev) => (prev + 1) % decisionSteps.length);
       }
     };
 
@@ -125,7 +130,7 @@ export default function HomePage() {
       eventSource.onerror = () => {
         eventSource?.close();
         fallbackInterval = window.setInterval(() => {
-          setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+          setActiveWheelStep((prev) => (prev + 1) % decisionSteps.length);
           setEventMessage((prev) => {
             const idx = fallbackMessages.indexOf(prev);
             return fallbackMessages[(idx + 1) % fallbackMessages.length] ?? fallbackMessages[0];
@@ -134,7 +139,7 @@ export default function HomePage() {
       };
     } catch {
       fallbackInterval = window.setInterval(() => {
-        setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+        setActiveWheelStep((prev) => (prev + 1) % decisionSteps.length);
         setEventMessage((prev) => {
           const idx = fallbackMessages.indexOf(prev);
           return fallbackMessages[(idx + 1) % fallbackMessages.length] ?? fallbackMessages[0];
