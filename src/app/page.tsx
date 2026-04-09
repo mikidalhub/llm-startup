@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
 import {
   Avatar,
   Box,
@@ -79,6 +82,82 @@ const glassCardSx = {
 };
 
 export default function HomePage() {
+  const [activeWheelStep, setActiveWheelStep] = useState(0);
+  const [eventMessage, setEventMessage] = useState('Bootstrapping autonomous pipeline...');
+
+  useEffect(() => {
+    const fallbackMessages = [
+      'Ingestion handler synced 128 fresh market ticks.',
+      'Value engine found 3 discounted cashflow opportunities.',
+      'Risk gate passed with CVaR and max-drawdown constraints.',
+      'Execution queue prepared with position sizing guardrails.'
+    ];
+
+    const inferStepFromMessage = (message: string) => {
+      const text = message.toLowerCase();
+      if (text.includes('ingest') || text.includes('market tick') || text.includes('stream')) return 0;
+      if (text.includes('value') || text.includes('screen') || text.includes('signal')) return 1;
+      if (text.includes('risk') || text.includes('drawdown') || text.includes('cvar')) return 2;
+      if (text.includes('execution') || text.includes('order') || text.includes('trade')) return 3;
+      return null;
+    };
+
+    const updateFromProcessEvent = (raw: ProcessEventPayload) => {
+      const incoming = raw?.message ?? raw?.type ?? 'Pipeline event received';
+      setEventMessage(incoming);
+      const inferred = inferStepFromMessage(incoming);
+      if (inferred !== null) {
+        setActiveWheelStep(inferred);
+      } else {
+        setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+      }
+    };
+
+    let fallbackInterval: number | null = null;
+    let eventSource: EventSource | null = null;
+
+    try {
+      eventSource = new EventSource('/events');
+      eventSource.addEventListener('process', (event) => {
+        const parsed = JSON.parse((event as MessageEvent<string>).data) as ProcessEventPayload;
+        updateFromProcessEvent(parsed);
+      });
+      eventSource.onerror = () => {
+        eventSource?.close();
+        fallbackInterval = window.setInterval(() => {
+          setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+          setEventMessage((prev) => {
+            const idx = fallbackMessages.indexOf(prev);
+            return fallbackMessages[(idx + 1) % fallbackMessages.length] ?? fallbackMessages[0];
+          });
+        }, 3000);
+      };
+    } catch {
+      fallbackInterval = window.setInterval(() => {
+        setActiveWheelStep((prev) => (prev + 1) % wheelSteps.length);
+        setEventMessage((prev) => {
+          const idx = fallbackMessages.indexOf(prev);
+          return fallbackMessages[(idx + 1) % fallbackMessages.length] ?? fallbackMessages[0];
+        });
+      }, 3000);
+    }
+
+    return () => {
+      if (fallbackInterval) window.clearInterval(fallbackInterval);
+      eventSource?.close();
+    };
+  }, []);
+
+  const wheelNodes = useMemo(
+    () => [
+      { top: '8%', left: '50%' },
+      { top: '50%', left: '92%' },
+      { top: '92%', left: '50%' },
+      { top: '50%', left: '8%' }
+    ],
+    []
+  );
+
   return (
     <Box
       sx={{
@@ -99,10 +178,10 @@ export default function HomePage() {
           >
             <Box>
               <Typography variant="overline" color="secondary.main">
-                Professional trading decision flow
+                Autonomous live trading process
               </Typography>
               <Typography variant="h3" fontWeight={700}>
-                Apex Decision Workspace
+                Trade by AI for you
               </Typography>
               <Typography color="text.secondary" sx={{ mt: 1, maxWidth: 560 }}>
                 Build a repeatable, high-conviction trading plan in minutes. Scan markets,
