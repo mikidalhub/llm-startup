@@ -11,7 +11,16 @@ const contentTypes = {
   '.webmanifest': 'application/manifest+json'
 };
 
+const getCorsOrigin = () => process.env.CORS_ALLOWED_ORIGIN || '*';
+
+const applyCorsHeaders = (res) => {
+  res.setHeader('Access-Control-Allow-Origin', getCorsOrigin());
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+};
+
 const createJsonResponse = (res, payload) => {
+  applyCorsHeaders(res);
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
 };
@@ -63,17 +72,24 @@ export const createServer = ({ engine, publicDir }) => {
   });
 
   return http.createServer(async (req, res) => {
+    if (req.method === 'OPTIONS') {
+      applyCorsHeaders(res);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname.length > 1 && url.pathname.endsWith('/')
       ? url.pathname.slice(0, -1)
       : url.pathname;
 
     if (pathname === '/events') {
+      applyCorsHeaders(res);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'Access-Control-Allow-Origin': '*'
+        Connection: 'keep-alive'
       });
       res.write(`event: state\ndata: ${JSON.stringify(engine.getState())}\n\n`);
       res.write(`event: process\ndata: ${JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString(), message: 'Event stream connected' })}\n\n`);
