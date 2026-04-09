@@ -51,3 +51,48 @@ Then open:
 
 - If `results.json` does not exist yet, APIs return safe default data.
 - This is a simulator for education. Do not use it for real-money trading decisions.
+
+## Deploy to Google Cloud Run
+
+### One-time setup
+
+Set your project ID, then run the deployment script:
+
+```bash
+# Optional if you use the default already configured in deploy.sh
+export PROJECT_ID=ltcc-492815
+# Optional if you use the default FE origin already configured in deploy.sh
+export FRONTEND_URL=https://mikidalhub.github.io/llm-startup
+./deploy.sh
+```
+
+The script performs:
+
+- `gcloud config set project $PROJECT_ID`
+- enabling required services (`run`, `artifactregistry`, `cloudbuild`)
+- Artifact Registry repository creation (if missing)
+- Docker auth configuration for Artifact Registry
+- image build and push
+- Cloud Run deployment
+
+### Defaults used by `deploy.sh`
+
+- `REGION=us-central1`
+- `REPOSITORY=myrepo`
+- `SERVICE_NAME=myapp`
+- `IMAGE_NAME=myapp`
+- `PROJECT_ID=ltcc-492815` (default)
+- `FRONTEND_URL=https://mikidalhub.github.io/llm-startup` (default; used to set backend CORS)
+
+You can override them for CI or different environments:
+
+```bash
+PROJECT_ID=my-project REGION=us-central1 REPOSITORY=myrepo SERVICE_NAME=myapp IMAGE_NAME=myapp FRONTEND_URL=https://my-frontend.vercel.app ./deploy.sh
+```
+
+After deployment, Cloud Run prints a URL similar to:
+
+`https://SERVICE_NAME-xxxxx-REGION.a.run.app`
+
+The server reads `PORT` from environment and defaults to `8080` for Cloud Run.
+The deployment script also sets `CORS_ALLOWED_ORIGIN` on Cloud Run so your deployed GitHub frontend can call backend APIs without browser CORS errors.

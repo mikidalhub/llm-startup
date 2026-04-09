@@ -1,7 +1,7 @@
 import { TradingEngine, loadConfig } from './trading-engine.js';
 import { createServer } from './app-server.js';
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 8080);
 const publicDir = new URL('./public/', import.meta.url);
 
 const config = await loadConfig(process.env.CONFIG_PATH || 'config.yaml');
