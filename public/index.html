@@ -3,75 +3,221 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Startup</title>
+    <title>AI Driven Stock Market Autonomous</title>
     <style>
-      :root { font-family: Inter, system-ui, sans-serif; color: #e5e7eb; background: #0b1220; }
-      body { margin: 0; padding: 24px; background: linear-gradient(180deg,#0b1220,#111827); }
-      h1 { margin: 0; font-size: clamp(28px,4vw,40px); }
-      p { color: #9ca3af; }
-      .hero { display:flex; justify-content:space-between; gap:16px; flex-wrap: wrap; align-items:center; }
-      .badge { padding:6px 12px; border-radius:999px; border:1px solid #334155; background:#0f172a; font-size:12px; }
-      .grid { margin-top:20px; display:grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap:16px; }
-      .card { background:#111827; border:1px solid #1f2937; border-radius:14px; padding:16px; }
-      .score { font-size:32px; font-weight:700; margin:8px 0; }
-      .meter { height:10px; border-radius:999px; background:#1f2937; overflow:hidden; }
-      .fill { height:100%; background:linear-gradient(90deg,#22c55e,#84cc16); }
-      .row { display:flex; justify-content:space-between; margin-top:8px; font-size:14px; }
-      .pill { padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+      :root {
+        font-family: Inter, system-ui, sans-serif;
+        color: #e5e7eb;
+        background: radial-gradient(circle at top, #0f2a59 0%, #070b18 55%, #04060f 100%);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 24px; min-height: 100vh; }
+      h1, h2, h3, p { margin: 0; }
+      .hero { display:flex; justify-content:space-between; align-items:center; flex-wrap: wrap; gap: 16px; }
+      .hero p { color: #bcd0ff; margin-top: 8px; }
+      .glass {
+        backdrop-filter: blur(12px);
+        background: linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06));
+        border: 1px solid rgba(255,255,255,0.22);
+        border-radius: 18px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+      }
+      .hero-actions { display: flex; gap: 10px; align-items: center; }
+      button {
+        border: 0;
+        color: #05212f;
+        background: linear-gradient(90deg, #5eead4, #22d3ee);
+        font-weight: 700;
+        padding: 12px 18px;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: transform .2s ease;
+      }
+      button:hover { transform: translateY(-1px) scale(1.01); }
+      .status-pill { padding: 8px 12px; border-radius: 999px; font-size: 12px; color: #cffafe; border: 1px solid #0891b2; }
+
+      .process { margin-top: 18px; padding: 18px; display: grid; grid-template-columns: 130px 1fr; gap: 16px; }
+      .wheel-wrap { display:flex; align-items:center; justify-content:center; }
+      .wheel {
+        width: 90px;
+        height: 90px;
+        border-radius: 50%;
+        border: 5px solid rgba(255,255,255,0.17);
+        border-top-color: #67e8f9;
+        animation: spin 1s linear infinite;
+      }
+      .wheel.paused { animation-play-state: paused; opacity: .4; }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      .tiny { color:#cbd5e1; font-size: 13px; margin-top: 8px; }
+
+      .grid { margin-top: 18px; display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+      .card { padding: 16px; }
+      .score { font-size: 32px; font-weight: 800; margin: 8px 0; }
+      table { width:100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { text-align:left; padding: 6px 2px; border-bottom: 1px solid rgba(255,255,255,0.12); font-size: 13px; }
+      .row { display:flex; justify-content:space-between; margin-top: 8px; font-size: 14px; }
+      .pill { padding:4px 10px; border-radius:999px; font-size:12px; font-weight:700; }
       .green { background:#14532d; color:#86efac; }
       .yellow { background:#713f12; color:#fde68a; }
-      .red { background:#7f1d1d; color:#fca5a5; }
-      table { width:100%; border-collapse:collapse; margin-top:8px; }
-      th,td { text-align:left; padding:8px 4px; border-bottom:1px solid #1f2937; font-size:13px; }
-      .small { font-size:13px; }
+      .red { background:#7f1d1d; color:#fecaca; }
+      .log { max-height: 180px; overflow: auto; font-size: 12px; color: #cbd5e1; margin-top: 8px; padding-right: 6px; }
+      .log-item { padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.1); }
     </style>
   </head>
   <body>
     <section class="hero">
       <div>
-        <h1>LLM Startup</h1>
-        <p>Beginner-friendly value investing dashboard focused on long-term, low-risk decisions.</p>
+        <h1>AI Driven Stock Market Autonomous</h1>
+        <p>A kid-friendly live simulator that shows each step: Yahoo data → AI decision → virtual trade.</p>
       </div>
-      <div class="badge">Daily Investor Brief • Updated every 60s</div>
+      <div class="hero-actions">
+        <button id="start-process">Start Process</button>
+        <div id="status-pill" class="status-pill glass">Status: connecting...</div>
+      </div>
+    </section>
+
+    <section class="process glass">
+      <div class="wheel-wrap"><div id="process-wheel" class="wheel paused"></div></div>
+      <div>
+        <h2>Live Process Stream</h2>
+        <p class="tiny" id="process-text">Connecting to backend events...</p>
+        <div class="log" id="event-log"></div>
+      </div>
     </section>
 
     <section class="grid">
-      <article class="card">
-        <h2>Portfolio Health</h2>
-        <div class="score">82 / 100</div>
-        <div class="meter"><div class="fill" style="width:82%"></div></div>
-        <div class="row"><span>Diversification</span><span class="pill yellow">Needs work</span></div>
-        <div class="row"><span>Risk level</span><span class="pill green">LOW</span></div>
+      <article class="card glass">
+        <h3>Portfolio Value</h3>
+        <div class="score" id="portfolio-value">$0.00</div>
+        <p class="tiny" id="updated-at">Waiting for data...</p>
       </article>
 
-      <article class="card">
-        <h2>Top Opportunities</h2>
+      <article class="card glass">
+        <h3>Recent Trades</h3>
         <table>
-          <thead><tr><th>Company</th><th>Score</th><th>Risk</th></tr></thead>
-          <tbody>
-            <tr><td>MSFT</td><td>84</td><td><span class="pill green">LOW</span></td></tr>
-            <tr><td>JNJ</td><td>80</td><td><span class="pill green">LOW</span></td></tr>
-            <tr><td>PG</td><td>77</td><td><span class="pill yellow">MED</span></td></tr>
-          </tbody>
+          <thead><tr><th>Time</th><th>Symbol</th><th>Action</th></tr></thead>
+          <tbody id="trades-body"></tbody>
         </table>
       </article>
 
-      <article class="card">
-        <h2>Dividend Income</h2>
-        <div class="score">$46/mo</div>
-        <p class="small">Projected annual income: <strong>$552</strong></p>
-        <div class="row"><span>Yield quality</span><span class="pill green">Strong</span></div>
-        <div class="row"><span>Payout safety</span><span class="pill yellow">Okay</span></div>
+      <article class="card glass">
+        <h3>Signals (RSI)</h3>
+        <table>
+          <thead><tr><th>Symbol</th><th>RSI</th><th>Signal</th></tr></thead>
+          <tbody id="signals-body"></tbody>
+        </table>
       </article>
 
-      <article class="card">
-        <h2>Beginner Market Signals</h2>
-        <div class="row"><span>Value</span><span class="pill green">GREEN</span></div>
-        <div class="row"><span>Quality</span><span class="pill green">GREEN</span></div>
-        <div class="row"><span>Risk</span><span class="pill yellow">YELLOW</span></div>
-        <div class="row"><span>Income</span><span class="pill green">GREEN</span></div>
-        <p class="small">Simple rule: favor Green, learn more on Yellow, avoid Red.</p>
+      <article class="card glass">
+        <h3>Traffic Lights for Beginners</h3>
+        <div class="row"><span>Value</span><span id="light-value" class="pill green">GREEN</span></div>
+        <div class="row"><span>Quality</span><span id="light-quality" class="pill yellow">YELLOW</span></div>
+        <div class="row"><span>Risk</span><span id="light-risk" class="pill yellow">YELLOW</span></div>
+        <div class="row"><span>Income</span><span id="light-income" class="pill red">RED</span></div>
       </article>
     </section>
+
+    <script>
+      const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+      const wheel = document.getElementById('process-wheel');
+      const eventLog = document.getElementById('event-log');
+      const processText = document.getElementById('process-text');
+      const statusPill = document.getElementById('status-pill');
+
+      const toLight = (score) => {
+        if (score >= 70) return { text: 'GREEN', className: 'pill green' };
+        if (score >= 40) return { text: 'YELLOW', className: 'pill yellow' };
+        return { text: 'RED', className: 'pill red' };
+      };
+
+      const pushEvent = (label) => {
+        const node = document.createElement('div');
+        node.className = 'log-item';
+        node.textContent = `[${new Date().toLocaleTimeString()}] ${label}`;
+        eventLog.prepend(node);
+        while (eventLog.children.length > 25) eventLog.removeChild(eventLog.lastChild);
+      };
+
+      const setRunning = (running, text) => {
+        wheel.classList.toggle('paused', !running);
+        processText.textContent = text;
+        statusPill.textContent = `Status: ${text}`;
+      };
+
+      const render = (payload) => {
+        document.getElementById('portfolio-value').textContent = money.format(payload.portfolioValue || 0);
+        document.getElementById('updated-at').textContent = `Last update: ${new Date(payload.timestamp).toLocaleTimeString()}`;
+
+        const trades = (payload.trades || []).slice(-8).reverse();
+        document.getElementById('trades-body').innerHTML = trades.map((trade) => `
+          <tr><td>${new Date(trade.ts || Date.now()).toLocaleTimeString()}</td><td>${trade.symbol || '-'}</td><td>${trade.action || 'HOLD'}</td></tr>
+        `).join('') || '<tr><td colspan="3">No trades yet.</td></tr>';
+
+        const signals = payload.signals || [];
+        document.getElementById('signals-body').innerHTML = signals.map((signal) => `
+          <tr><td>${signal.symbol}</td><td>${Number(signal.rsi || 0).toFixed(2)}</td><td>${signal.signal || 'HOLD'}</td></tr>
+        `).join('') || '<tr><td colspan="3">No signals yet.</td></tr>';
+
+        const avgRsi = signals.length ? signals.reduce((sum, s) => sum + Number(s.rsi || 0), 0) / signals.length : 50;
+        const buyCount = signals.filter((s) => s.signal === 'BUY').length;
+        const sellCount = signals.filter((s) => s.signal === 'SELL').length;
+        const lights = {
+          value: toLight(100 - Math.abs(avgRsi - 50) * 2),
+          quality: toLight(55 + (payload.trades?.length ? 10 : 0)),
+          risk: toLight(100 - sellCount * 20),
+          income: toLight(40 + buyCount * 10)
+        };
+
+        for (const [key, light] of Object.entries(lights)) {
+          const node = document.getElementById(`light-${key}`);
+          node.textContent = light.text;
+          node.className = light.className;
+        }
+      };
+
+      const refresh = async () => {
+        const response = await fetch('/api/results');
+        const payload = await response.json();
+        render(payload);
+      };
+
+      const connectEvents = () => {
+        const stream = new EventSource('/events');
+        stream.addEventListener('state', (event) => {
+          const state = JSON.parse(event.data);
+          if (state.status?.running) {
+            setRunning(true, state.status.message || 'Running...');
+          } else {
+            setRunning(false, state.status?.message || 'Idle');
+          }
+        });
+
+        stream.addEventListener('process', (event) => {
+          const process = JSON.parse(event.data);
+          const label = process.symbol ? `${process.type}: ${process.symbol}` : process.type;
+          pushEvent(label);
+
+          if (process.type === 'tick-started') setRunning(true, `Running ${process.source || 'cycle'}...`);
+          if (process.type === 'tick-finished') {
+            setRunning(false, process.errors ? `Finished with warnings` : 'Cycle complete');
+            void refresh();
+          }
+        });
+
+        stream.onerror = () => {
+          setRunning(false, 'Reconnecting event stream...');
+        };
+      };
+
+      document.getElementById('start-process').addEventListener('click', async () => {
+        setRunning(true, 'Manual process started...');
+        pushEvent('manual-start-requested');
+        await fetch('/api/process/start', { method: 'POST' });
+      });
+
+      refresh().catch((err) => setRunning(false, `Data error: ${err.message}`));
+      setInterval(() => refresh().catch(() => {}), 5000);
+      connectEvents();
+    </script>
   </body>
 </html>

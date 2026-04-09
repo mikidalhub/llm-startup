@@ -100,6 +100,9 @@ export class TradingEngine {
     this.lastError = null;
     this.timer = null;
     this.listeners = new Set();
+    this.eventListeners = new Set();
+    this.isTicking = false;
+    this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: null };
     this.yahoo = dependencies.yahoo ?? new YahooClient({ fetchImpl: this.fetchFn });
   }
 
@@ -110,6 +113,16 @@ export class TradingEngine {
 
   notify() {
     for (const listener of this.listeners) listener(this.getState());
+  }
+
+  onEvent(listener) {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
+  emitEvent(type, payload = {}) {
+    const event = { timestamp: new Date().toISOString(), type, ...payload };
+    for (const listener of this.eventListeners) listener(event);
   }
 
   async fetchSymbolSnapshot(symbol) {
@@ -392,34 +405,79 @@ export class TradingEngine {
   }
 
   async persistResults() {
-    await this.writeFileFn(this.config.outputPath, JSON.stringify({ updatedAt: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError }, null, 2));
+    const signals = Object.values(this.snapshots).map((snapshot) => ({
+      symbol: snapshot.symbol,
+      price: snapshot.price,
+      rsi: snapshot.rsi,
+      signal: snapshot.rsi < 35 ? 'BUY' : snapshot.rsi > 70 ? 'SELL' : 'HOLD',
+      timestamp: snapshot.ts
+    }));
+
+    await this.writeFileFn(this.config.outputPath, JSON.stringify({
+      timestamp: new Date().toISOString(),
+      portfolioValue: this.getPortfolioValue(),
+      positions: this.portfolio.positions,
+      trades: this.portfolio.trades,
+      signals,
+      updatedAt: new Date().toISOString(),
+      config: this.config,
+      snapshots: this.snapshots,
+      portfolio: this.portfolio,
+      lastError: this.lastError
+    }, null, 2));
   }
 
-  async tick() {
-    const errors = [];
-    for (const symbol of this.config.symbols) {
-      let snapshot;
-      try {
-        snapshot = await this.fetchSymbolSnapshot(symbol);
-      } catch (error) {
-        snapshot = this.buildSyntheticSnapshot(symbol);
-        errors.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      this.snapshots[symbol] = snapshot;
-      const decision = await this.llmDecide(snapshot);
-      this.executeTrade(symbol, snapshot, decision);
+  async tick(source = 'SCHEDULED') {
+    if (this.isTicking) {
+      this.emitEvent('tick-skipped', { source, reason: 'already-running' });
+      return;
     }
 
-    this.lastError = errors.length ? errors.join(' | ') : null;
-    this.updateMetrics();
-    await this.persistResults();
-    this.notify();
+    this.isTicking = true;
+    this.status = { stage: 'START', message: `Process started (${source})`, running: true, lastRunAt: new Date().toISOString() };
+    this.emitEvent('tick-started', { source, symbols: this.config.symbols });
+
+    const errors = [];
+    try {
+      for (const symbol of this.config.symbols) {
+        this.status = { stage: 'FETCHING', message: `Fetching market data for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
+        this.emitEvent('symbol-fetch-started', { symbol });
+        let snapshot;
+        try {
+          snapshot = await this.fetchSymbolSnapshot(symbol);
+          this.emitEvent('symbol-fetched', { symbol, price: snapshot.price, rsi: snapshot.rsi });
+        } catch (error) {
+          snapshot = this.buildSyntheticSnapshot(symbol);
+          errors.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          this.emitEvent('symbol-fallback', { symbol, reason: error instanceof Error ? error.message : String(error) });
+        }
+        this.snapshots[symbol] = snapshot;
+
+        this.status = { stage: 'DECIDING', message: `AI decision for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
+        const decision = await this.llmDecide(snapshot);
+        this.emitEvent('decision-made', { symbol, action: decision.action, size_pct: decision.size_pct });
+
+        this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
+        this.executeTrade(symbol, snapshot, decision);
+        this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price });
+      }
+
+      this.lastError = errors.length ? errors.join(' | ') : null;
+      this.status = { stage: 'PERSISTING', message: 'Saving results', running: true, lastRunAt: new Date().toISOString() };
+      this.updateMetrics();
+      await this.persistResults();
+      this.notify();
+      this.emitEvent('tick-finished', { source, errors: this.lastError });
+    } finally {
+      this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: new Date().toISOString() };
+      this.isTicking = false;
+    }
   }
 
   async start() {
-    await this.tick();
+    await this.tick('BOOT');
     this.timer = setInterval(() => {
-      void this.tick();
+      void this.tick('SCHEDULED');
     }, this.config.pollIntervalSeconds * 1000);
   }
 
@@ -428,6 +486,13 @@ export class TradingEngine {
   }
 
   getState() {
-    return { timestamp: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError };
+    return {
+      timestamp: new Date().toISOString(),
+      config: this.config,
+      snapshots: this.snapshots,
+      portfolio: this.portfolio,
+      lastError: this.lastError,
+      status: this.status
+    };
   }
 }
