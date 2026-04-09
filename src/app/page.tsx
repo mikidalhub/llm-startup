@@ -59,6 +59,8 @@ const tradeTicket = [
   { label: 'Position size', value: '0.7% NAV' }
 ];
 
+const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA?.slice(0, 7) ?? 'local';
+
 const glassCardSx = {
   border: '1px solid',
   borderColor: 'rgba(148, 163, 184, 0.24)',
@@ -99,6 +101,12 @@ export default function HomePage() {
                 validate signals, approve risk, and publish execution details in a single,
                 self-explanatory flow.
               </Typography>
+              <Chip
+                label={`Build ${buildSha}`}
+                size="small"
+                variant="outlined"
+                sx={{ mt: 2, borderColor: 'rgba(148, 163, 184, 0.45)' }}
+              />
             </Box>
             <Stack direction="row" spacing={2}>
               <Button variant="outlined" color="inherit">
