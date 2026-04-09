@@ -16,6 +16,30 @@ const createJsonResponse = (res, payload) => {
   res.end(JSON.stringify(payload));
 };
 
+const readResultsPayload = async (resultsPath) => {
+  const fallback = {
+    timestamp: new Date().toISOString(),
+    portfolioValue: 0,
+    positions: {},
+    trades: [],
+    signals: []
+  };
+
+  try {
+    const raw = await readFile(resultsPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return {
+      timestamp: parsed.timestamp ?? parsed.updatedAt ?? fallback.timestamp,
+      portfolioValue: parsed.portfolioValue ?? parsed.portfolio?.metrics?.portfolioValue ?? 0,
+      positions: parsed.positions ?? parsed.portfolio?.positions ?? {},
+      trades: parsed.trades ?? parsed.portfolio?.trades ?? [],
+      signals: parsed.signals ?? []
+    };
+  } catch {
+    return fallback;
+  }
+};
+
 const getSafeAssetPath = (publicPath, requestPath) => {
   const normalizedPath = normalize(requestPath).replace(/^([.]{2}[\\/])+/, '');
   return join(publicPath, normalizedPath);
@@ -23,9 +47,16 @@ const getSafeAssetPath = (publicPath, requestPath) => {
 
 export const createServer = ({ engine, publicDir }) => {
   const sseClients = new Set();
+  const resultsPath = engine.config?.outputPath ?? './results.json';
 
   engine.onUpdate((state) => {
     const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
+    for (const client of sseClients) {
+      client.write(payload);
+    }
+  });
+  engine.onEvent?.((event) => {
+    const payload = `event: process\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of sseClients) {
       client.write(payload);
     }
@@ -45,6 +76,7 @@ export const createServer = ({ engine, publicDir }) => {
         'Access-Control-Allow-Origin': '*'
       });
       res.write(`event: state\ndata: ${JSON.stringify(engine.getState())}\n\n`);
+      res.write(`event: process\ndata: ${JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString(), message: 'Event stream connected' })}\n\n`);
       sseClients.add(res);
       req.on('close', () => {
         sseClients.delete(res);
@@ -52,8 +84,19 @@ export const createServer = ({ engine, publicDir }) => {
       return;
     }
 
+    if (pathname === '/api/process/start' && req.method === 'POST') {
+      void engine.tick?.('MANUAL');
+      createJsonResponse(res, { ok: true, startedAt: new Date().toISOString() });
+      return;
+    }
+
     if (pathname === '/api/state' || pathname === '/state') {
       createJsonResponse(res, engine.getState());
+      return;
+    }
+
+    if (pathname === '/api/results') {
+      createJsonResponse(res, await readResultsPayload(resultsPath));
       return;
     }
 
@@ -63,12 +106,18 @@ export const createServer = ({ engine, publicDir }) => {
     }
 
     if (pathname === '/portfolio' || pathname === '/api/portfolio') {
-      const state = engine.getState();
+      const results = await readResultsPayload(resultsPath);
       createJsonResponse(res, {
-        cash: state.portfolio.cash,
-        positions: state.portfolio.positions,
-        metrics: state.portfolio.metrics
+        portfolioValue: results.portfolioValue,
+        positions: results.positions,
+        trades: results.trades.slice(-50)
       });
+      return;
+    }
+
+    if (pathname === '/api/signals' || pathname === '/signals') {
+      const results = await readResultsPayload(resultsPath);
+      createJsonResponse(res, results.signals);
       return;
     }
 
