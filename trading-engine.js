@@ -11,7 +11,7 @@ import { buildBeginnerView, buildExplanation } from './explainer/investment-expl
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-const calculateRSI = (closes, period = 14) => {
+export const calculateRSI = (closes, period = 14) => {
   if (closes.length <= period) return 50;
 
   let gains = 0;
@@ -55,7 +55,7 @@ export const parseJsonBlock = (rawText) => {
   }
 };
 
-const buildFallbackDecision = (snapshot) => {
+export const buildFallbackDecision = (snapshot) => {
   if (snapshot.rsi < 35) return { action: 'BUY', size_pct: 0.07, reason: 'RSI indicates oversold conditions.' };
   if (snapshot.rsi > 70) return { action: 'SELL', size_pct: 0.07, reason: 'RSI indicates overbought conditions.' };
   return { action: 'HOLD', size_pct: 0, reason: 'Momentum is neutral.' };
@@ -100,7 +100,7 @@ export class TradingEngine {
     this.lastError = null;
     this.timer = null;
     this.listeners = new Set();
-    this.yahoo = new YahooClient();
+    this.yahoo = dependencies.yahoo ?? new YahooClient({ fetchImpl: this.fetchFn });
   }
 
   onUpdate(listener) {
@@ -392,7 +392,7 @@ export class TradingEngine {
   }
 
   async persistResults() {
-    await writeFile(this.config.outputPath, JSON.stringify({ updatedAt: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError }, null, 2));
+    await this.writeFileFn(this.config.outputPath, JSON.stringify({ updatedAt: new Date().toISOString(), config: this.config, snapshots: this.snapshots, portfolio: this.portfolio, lastError: this.lastError }, null, 2));
   }
 
   async tick() {

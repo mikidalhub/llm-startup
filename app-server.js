@@ -33,8 +33,11 @@ export const createServer = ({ engine, publicDir }) => {
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname.length > 1 && url.pathname.endsWith('/')
+      ? url.pathname.slice(0, -1)
+      : url.pathname;
 
-    if (url.pathname === '/events') {
+    if (pathname === '/events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -49,17 +52,17 @@ export const createServer = ({ engine, publicDir }) => {
       return;
     }
 
-    if (url.pathname === '/api/state') {
+    if (pathname === '/api/state' || pathname === '/state') {
       createJsonResponse(res, engine.getState());
       return;
     }
 
-    if (url.pathname === '/trades') {
+    if (pathname === '/trades' || pathname === '/api/trades') {
       createJsonResponse(res, engine.getState().portfolio.trades.slice(-50));
       return;
     }
 
-    if (url.pathname === '/portfolio') {
+    if (pathname === '/portfolio' || pathname === '/api/portfolio') {
       const state = engine.getState();
       createJsonResponse(res, {
         cash: state.portfolio.cash,
@@ -69,7 +72,63 @@ export const createServer = ({ engine, publicDir }) => {
       return;
     }
 
-    const requestPath = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    try {
+      if (pathname === '/opportunities' || pathname === '/api/opportunities') {
+        createJsonResponse(res, await engine.getOpportunities());
+        return;
+      }
+
+      if (pathname === '/dividends' || pathname === '/api/dividends') {
+        createJsonResponse(res, await engine.getDividendsOverview());
+        return;
+      }
+
+      if (pathname === '/risk' || pathname === '/api/risk') {
+        createJsonResponse(res, await engine.getRiskOverview());
+        return;
+      }
+
+      if (pathname === '/daily-brief' || pathname === '/api/daily-brief') {
+        createJsonResponse(res, await engine.getDailyBrief());
+        return;
+      }
+
+      if (pathname.startsWith('/company/') || pathname.startsWith('/api/company/')) {
+        const ticker = pathname.split('/').pop()?.toUpperCase();
+        if (!ticker) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Missing ticker.' }));
+          return;
+        }
+        createJsonResponse(res, await engine.buildCompanyCard(ticker));
+        return;
+      }
+
+      if (pathname.startsWith('/analysis/') || pathname.startsWith('/api/analysis/')) {
+        const ticker = pathname.split('/').pop()?.toUpperCase();
+        if (!ticker) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Missing ticker.' }));
+          return;
+        }
+        const card = await engine.buildCompanyCard(ticker);
+        createJsonResponse(res, {
+          ticker,
+          fundamentalScore: card.fundamental.fundamentalScore,
+          valueScore: card.valueScore,
+          riskScore: card.riskScore,
+          beginner: card.beginner,
+          explanation: card.explanation
+        });
+        return;
+      }
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
+
+    const requestPath = pathname === '/' ? 'index.html' : pathname.slice(1);
     const filePath = getSafeAssetPath(publicDir.pathname, requestPath);
     const ext = extname(filePath);
 
