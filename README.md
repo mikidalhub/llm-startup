@@ -106,3 +106,28 @@ NEXT_PUBLIC_API_ORIGIN=https://SERVICE-NAME-xxxxx-uc.a.run.app
 ```
 
 Without this variable, the frontend uses same-origin calls (for example `/api/process/start`), which on GitHub Pages resolves to the GitHub Pages domain and not to Cloud Run.
+
+### `NEXT_PUBLIC_BASE_PATH` vs `NEXT_PUBLIC_API_ORIGIN`
+
+- `NEXT_PUBLIC_BASE_PATH` is only for frontend URL path prefixing (for example `/llm-startup` on GitHub Pages).
+- `NEXT_PUBLIC_API_ORIGIN` is for backend host routing (for example `https://SERVICE-NAME-xxxxx-uc.a.run.app`).
+
+If frontend and backend are on different domains, set `NEXT_PUBLIC_API_ORIGIN`.
+
+## CI/CD backend deployment
+
+GitHub Actions now includes `.github/workflows/deploy-backend.yml`, which runs `./deploy.sh` on `push` to `main` and on manual trigger.
+
+Required GitHub Actions configuration:
+
+- **Secrets**
+  - `GCP_WORKLOAD_IDENTITY_PROVIDER`
+  - `GCP_SERVICE_ACCOUNT`
+- **Repository Variables**
+  - `GCP_PROJECT_ID`
+  - `GCP_REGION`
+  - `GCP_ARTIFACT_REPOSITORY`
+  - `GCP_CLOUD_RUN_SERVICE`
+  - `GCP_IMAGE_NAME`
+  - `FRONTEND_URL`
+  - `NEXT_PUBLIC_API_ORIGIN` (for frontend workflow)
