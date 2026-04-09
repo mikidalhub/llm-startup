@@ -71,8 +71,6 @@ const processHandlers = [
 ];
 
 const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA?.slice(0, 7) ?? 'local';
-const wheelSteps = ['Data Ingestion', 'Value Screening', 'Risk Calibration', 'Execution'];
-type ProcessEventPayload = { message?: string; type?: string };
 
 const glassCardSx = {
   border: '1px solid',
@@ -219,7 +217,7 @@ export default function HomePage() {
                       Continuous flow process handler
                     </Typography>
                     <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-                      Event-driven pipeline running in real time so the future feels already here.
+                      Event-driven pipeline running in real time to make execution feel always-on.
                     </Typography>
                   </Box>
                   <Chip color="success" label="Realtime stream online" />
@@ -249,91 +247,8 @@ export default function HomePage() {
                 />
 
                 <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Box
-                      sx={{
-                        minHeight: 290,
-                        borderRadius: 2,
-                        border: '1px solid rgba(148, 163, 184, 0.22)',
-                        bgcolor: 'rgba(15, 23, 42, 0.42)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        p: 2,
-                        position: 'relative'
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 280,
-                          height: 280,
-                          borderRadius: '50%',
-                          border: '1px dashed rgba(148, 163, 184, 0.5)',
-                          position: 'relative'
-                        }}
-                      >
-                        {wheelSteps.map((step, index) => {
-                          const active = index === activeWheelStep;
-                          return (
-                            <Box
-                              key={step}
-                              sx={{
-                                position: 'absolute',
-                                top: wheelNodes[index].top,
-                                left: wheelNodes[index].left,
-                                transform: 'translate(-50%, -50%)',
-                                width: 82,
-                                height: 82,
-                                borderRadius: '50%',
-                                bgcolor: active ? 'primary.main' : 'rgba(30, 41, 59, 0.92)',
-                                border: active
-                                  ? '1px solid rgba(191, 219, 254, 0.95)'
-                                  : '1px solid rgba(148, 163, 184, 0.32)',
-                                boxShadow: active
-                                  ? '0 0 28px rgba(96, 165, 250, 0.7)'
-                                  : '0 10px 20px rgba(15, 23, 42, 0.3)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                textAlign: 'center',
-                                p: 1
-                              }}
-                            >
-                              <Typography variant="caption" fontWeight={700}>
-                                {step}
-                              </Typography>
-                            </Box>
-                          );
-                        })}
-
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            width: 136,
-                            height: 136,
-                            borderRadius: '50%',
-                            border: '1px solid rgba(148, 163, 184, 0.42)',
-                            bgcolor: 'rgba(15, 23, 42, 0.88)',
-                            backdropFilter: 'blur(10px)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            textAlign: 'center',
-                            p: 2
-                          }}
-                        >
-                          <Typography variant="caption" color="text.secondary">
-                            {eventMessage}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </Box>
-                  </Grid>
                   {processHandlers.map((handler) => (
-                    <Grid item xs={12} md={3} key={handler.name}>
+                    <Grid item xs={12} md={6} key={handler.name}>
                       <Box
                         sx={{
                           p: 2,
