@@ -59,9 +59,26 @@ const tradeTicket = [
   { label: 'Position size', value: '0.7% NAV' }
 ];
 
+const glassCardSx = {
+  border: '1px solid',
+  borderColor: 'rgba(148, 163, 184, 0.24)',
+  bgcolor: 'rgba(15, 23, 42, 0.52)',
+  backdropFilter: 'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  boxShadow: '0 20px 45px rgba(15, 23, 42, 0.28)'
+};
+
 export default function HomePage() {
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        py: { xs: 4, md: 8 },
+        bgcolor: 'background.default',
+        backgroundImage:
+          'radial-gradient(circle at 15% 20%, rgba(96,165,250,0.22), transparent 45%), radial-gradient(circle at 85% 15%, rgba(245,158,11,0.2), transparent 42%), linear-gradient(180deg, #0b0f14 0%, #0f172a 100%)'
+      }}
+    >
       <Container maxWidth="lg">
         <Stack spacing={4}>
           <Stack
@@ -94,7 +111,7 @@ export default function HomePage() {
           <Grid container spacing={3}>
             {insights.map((metric) => (
               <Grid item xs={12} md={4} key={metric.label}>
-                <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+                <Card elevation={0} sx={glassCardSx}>
                   <CardContent>
                     <Typography color="text.secondary" variant="subtitle2">
                       {metric.label}
@@ -116,7 +133,7 @@ export default function HomePage() {
 
           <Grid container spacing={3}>
             <Grid item xs={12} md={7}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Stack spacing={3}>
                     <Box>
@@ -160,7 +177,7 @@ export default function HomePage() {
               </Card>
             </Grid>
             <Grid item xs={12} md={5}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Trade ticket
@@ -192,7 +209,7 @@ export default function HomePage() {
 
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Signal stack
@@ -221,7 +238,7 @@ export default function HomePage() {
               </Card>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Live watchlist
