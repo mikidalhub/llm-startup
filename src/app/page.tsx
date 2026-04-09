@@ -28,6 +28,12 @@ const insights = [
   { label: 'Liquidity score', value: 'A-', change: '+1' }
 ];
 
+const symbolDetails: Record<string, string> = {
+  AAPL: 'Apple · NASDAQ',
+  MSFT: 'Microsoft · NASDAQ',
+  TSLA: 'Tesla · NASDAQ'
+};
+
 type StreamMode = 'connecting' | 'live' | 'fallback';
 
 type ProcessEventPayload = {
@@ -248,6 +254,9 @@ export default function HomePage() {
     []
   );
 
+  const wheelProgress = ((activeWheelStep + 1) / decisionSteps.length) * 100;
+  const wheelAngle = -90 + (wheelProgress / 100) * 360;
+
   const triggerProcessTick = async () => {
     const basePath = getBasePath();
     try {
@@ -312,23 +321,74 @@ export default function HomePage() {
                           width: { xs: 260, md: 310 },
                           height: { xs: 260, md: 310 },
                           borderRadius: '50%',
-                          border: '1px solid rgba(148, 163, 184, 0.35)',
+                          border: '1px solid rgba(148, 163, 184, 0.4)',
                           bgcolor: 'rgba(15, 23, 42, 0.25)',
                           transition: 'all 600ms cubic-bezier(0.22, 1, 0.36, 1)'
                         }}
                       >
                         <CircularProgress
                           variant="determinate"
-                          value={((activeWheelStep + 1) / decisionSteps.length) * 100}
+                          value={100}
                           size="100%"
                           thickness={1.7}
+                          sx={{ position: 'absolute', inset: 0, color: 'rgba(148, 163, 184, 0.38)' }}
+                        />
+                        <Box
                           sx={{
                             position: 'absolute',
-                            inset: 0,
-                            color: '#38bdf8',
+                            inset: { xs: 12, md: 14 },
+                            borderRadius: '50%',
+                            background: `conic-gradient(from -90deg, rgba(56, 189, 248, 0.95) 0deg, rgba(56, 189, 248, 0.95) ${
+                              (wheelProgress / 100) * 360
+                            }deg, transparent ${(wheelProgress / 100) * 360}deg, transparent 360deg)`,
+                            WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 8px))',
+                            mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 8px))',
                             transition: 'all 600ms cubic-bezier(0.22, 1, 0.36, 1)'
                           }}
                         />
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            width: { xs: 236, md: 282 },
+                            height: { xs: 236, md: 282 },
+                            transform: `translate(-50%, -50%) rotate(${wheelAngle}deg)`,
+                            transition: 'transform 600ms cubic-bezier(0.22, 1, 0.36, 1)',
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 0,
+                              left: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              width: 12,
+                              height: 12,
+                              borderRadius: '50%',
+                              bgcolor: '#38bdf8',
+                              boxShadow: '0 0 0 5px rgba(56,189,248,.18)'
+                            }}
+                          />
+                        </Box>
+
+                        {wheelNodes.map((node, idx) => (
+                          <Box
+                            key={`wheel-anchor-${idx}`}
+                            sx={{
+                              position: 'absolute',
+                              top: node.top,
+                              left: node.left,
+                              transform: 'translate(-50%, -50%)',
+                              width: 10,
+                              height: 10,
+                              borderRadius: '50%',
+                              border: '2px solid rgba(148, 163, 184, 0.65)',
+                              bgcolor: 'rgba(255,255,255,0.72)'
+                            }}
+                          />
+                        ))}
 
                         {decisionSteps.map((step, idx) => (
                           <Box
@@ -405,57 +465,76 @@ export default function HomePage() {
                     </Stack>
                   </CardContent>
                 </Card>
-
-                <Card elevation={0} sx={glassCardSx}>
-                  <CardContent>
-                    <Typography variant="h6" fontWeight={700}>
-                      At-a-glance metrics
-                    </Typography>
-                    <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
-                      {insights.map((metric) => (
-                        <Grid item xs={4} key={metric.label}>
-                          <Box sx={{ p: 1.2, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.62)', border: '1px solid rgba(148, 163, 184, 0.2)' }}>
-                            <Typography variant="caption" color="text.secondary">
-                              {metric.label}
-                            </Typography>
-                            <Typography variant="h6" fontWeight={700}>
-                              {metric.value}
-                            </Typography>
-                            <Chip label={metric.change} color={metric.change.startsWith('-') ? 'warning' : 'success'} size="small" />
-                          </Box>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </CardContent>
-                </Card>
-
-                <Card elevation={0} sx={glassCardSx}>
-                  <CardContent>
-                    <Typography variant="h6" fontWeight={700}>
-                      Latest fills
-                    </Typography>
-                    <Stack spacing={1.2} sx={{ mt: 1.5 }}>
-                      {currentTrades.map((trade) => (
-                        <Stack key={`${trade.symbol}-${trade.timestamp}`} direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.5, py: 1, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.58)' }}>
-                          <Box>
-                            <Typography fontWeight={600}>{trade.symbol}</Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {new Date(trade.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}{' '}
-                              UTC
-                            </Typography>
-                          </Box>
-                          <Stack alignItems="flex-end" spacing={0.4}>
-                            <Chip size="small" label={`${trade.side} ${trade.quantity}`} color={trade.side === 'SELL' ? 'error' : 'success'} />
-                            <Typography variant="body2" fontWeight={700}>
-                              ${trade.price.toFixed(2)}
-                            </Typography>
-                          </Stack>
-                        </Stack>
-                      ))}
-                    </Stack>
-                  </CardContent>
-                </Card>
               </Stack>
+            </Grid>
+            <Grid item xs={12}>
+              <Card elevation={0} sx={glassCardSx}>
+                <CardContent>
+                  <Grid container spacing={2} alignItems="stretch">
+                    <Grid item xs={12} md={8}>
+                      <Typography variant="h6" fontWeight={700}>
+                        Latest fills
+                      </Typography>
+                      <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
+                        {currentTrades.map((trade) => (
+                          <Grid item xs={12} sm={4} key={`${trade.symbol}-${trade.timestamp}`}>
+                            <Stack
+                              direction="row"
+                              justifyContent="space-between"
+                              alignItems="center"
+                              sx={{ px: 1.5, py: 1.1, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.58)' }}
+                            >
+                              <Box>
+                                <Typography fontWeight={600}>{trade.symbol}</Typography>
+                                <Typography variant="caption" sx={{ display: 'block', color: 'rgba(100, 116, 139, 0.95)' }}>
+                                  {symbolDetails[trade.symbol] ?? 'US Equity · Live feed'}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {new Date(trade.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}{' '}
+                                  UTC
+                                </Typography>
+                              </Box>
+                              <Stack alignItems="flex-end" spacing={0.4}>
+                                <Chip size="small" label={`${trade.side} ${trade.quantity}`} color={trade.side === 'SELL' ? 'error' : 'success'} />
+                                <Typography variant="body2" fontWeight={700}>
+                                  ${trade.price.toFixed(2)}
+                                </Typography>
+                              </Stack>
+                            </Stack>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <Typography variant="h6" fontWeight={700}>
+                        At-a-glance metrics
+                      </Typography>
+                      <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
+                        {insights.map((metric) => (
+                          <Grid item xs={4} md={12} key={metric.label}>
+                            <Stack
+                              direction={{ xs: 'column', md: 'row' }}
+                              justifyContent="space-between"
+                              alignItems={{ xs: 'flex-start', md: 'center' }}
+                              sx={{ p: 1.2, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.62)', border: '1px solid rgba(148, 163, 184, 0.2)' }}
+                            >
+                              <Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  {metric.label}
+                                </Typography>
+                                <Typography variant="h6" fontWeight={700}>
+                                  {metric.value}
+                                </Typography>
+                              </Box>
+                              <Chip label={metric.change} color={metric.change.startsWith('-') ? 'warning' : 'success'} size="small" />
+                            </Stack>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Grid>
+                  </Grid>
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
         </Stack>
