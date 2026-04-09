@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import ThemeRegistry from './theme-registry';
 
 export const metadata: Metadata = {
-  title: 'Nimbus Ops Dashboard',
-  description: 'Offline-capable operations dashboard for a startup team.',
+  title: 'Live Trading Control Center',
+  description: 'Realtime trading operations dashboard focused on wheel state, server events, risk and executions.',
   manifest: 'manifest.webmanifest'
 };
 
