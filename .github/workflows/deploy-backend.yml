@@ -1,0 +1,53 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cloud-run-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      SERVICE_NAME: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      IMAGE_NAME: ${{ vars.GCP_IMAGE_NAME }}
+      FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Validate required deploy variables
+        run: |
+          set -euo pipefail
+          required=(PROJECT_ID REGION REPOSITORY SERVICE_NAME IMAGE_NAME FRONTEND_URL)
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required Actions variable: $key"
+              exit 1
+            fi
+          done
+
+      - name: Deploy backend via deploy.sh
+        run: |
+          chmod +x ./deploy.sh
+          ./deploy.sh
