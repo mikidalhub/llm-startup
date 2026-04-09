@@ -131,6 +131,8 @@ export default function HomePage() {
   const [activeWheelStep, setActiveWheelStep] = useState(0);
   const [eventMessage, setEventMessage] = useState('Bootstrapping autonomous pipeline...');
   const [currentTrades, setCurrentTrades] = useState<TradingRow[]>([]);
+  const [streamMode, setStreamMode] = useState<'connecting' | 'live' | 'fallback'>('connecting');
+  const [lastEventAt, setLastEventAt] = useState<string | null>(null);
 
   useEffect(() => {
     const fallbackMessages = [
@@ -162,6 +164,7 @@ export default function HomePage() {
     const updateFromProcessEvent = (raw: ProcessEventPayload) => {
       const incoming = raw?.message ?? raw?.type ?? 'Pipeline event received';
       setEventMessage(incoming);
+      setLastEventAt(new Date().toISOString());
       const inferred = inferStepFromMessage(incoming);
       if (inferred !== null) {
         setActiveWheelStep(inferred);
@@ -173,23 +176,31 @@ export default function HomePage() {
     let fallbackInterval: number | null = null;
     let eventSource: EventSource | null = null;
 
-    const shouldUseFallbackOnly = window.location.hostname.endsWith('github.io');
+    const forceLive = new URLSearchParams(window.location.search).get('live') === '1';
+    const shouldUseFallbackOnly = window.location.hostname.endsWith('github.io') && !forceLive;
 
     if (shouldUseFallbackOnly) {
+      setStreamMode('fallback');
       fallbackInterval = runFallbackTicker();
     } else {
       try {
         const basePath = getBasePath();
         eventSource = new EventSource(`${basePath}/events`);
+        eventSource.onopen = () => {
+          setStreamMode('live');
+          setEventMessage('Connected to backend event stream.');
+        };
         eventSource.addEventListener('process', (event) => {
           const parsed = JSON.parse((event as MessageEvent<string>).data) as ProcessEventPayload;
           updateFromProcessEvent(parsed);
         });
         eventSource.onerror = () => {
           eventSource?.close();
+          setStreamMode('fallback');
           if (!fallbackInterval) fallbackInterval = runFallbackTicker();
         };
       } catch {
+        setStreamMode('fallback');
         fallbackInterval = runFallbackTicker();
       }
     }
@@ -248,6 +259,17 @@ export default function HomePage() {
     ],
     []
   );
+
+  const triggerProcessTick = async () => {
+    const basePath = getBasePath();
+    try {
+      const response = await fetch(`${basePath}/api/process/start`, { method: 'POST' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setEventMessage('Manual backend tick requested.');
+    } catch {
+      setEventMessage('Unable to trigger backend tick from this environment.');
+    }
+  };
 
   return (
     <Box
@@ -330,8 +352,21 @@ export default function HomePage() {
                       Event-driven pipeline running in real time with graceful fallback on static hosting.
                     </Typography>
                   </Box>
-                  <Chip color="success" label="Realtime mode aware" />
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip
+                      color={streamMode === 'live' ? 'success' : streamMode === 'connecting' ? 'warning' : 'default'}
+                      label={`Stream: ${streamMode}`}
+                    />
+                    <Button variant="outlined" size="small" onClick={triggerProcessTick}>
+                      Test backend tick
+                    </Button>
+                  </Stack>
                 </Stack>
+                {lastEventAt ? (
+                  <Typography variant="caption" color="text.secondary">
+                    Last backend message: {new Date(lastEventAt).toLocaleTimeString('en-US', { hour12: false })}
+                  </Typography>
+                ) : null}
 
                 <Box
                   sx={{
