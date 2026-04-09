@@ -8,6 +8,7 @@ import {
   Container,
   Divider,
   Grid,
+  LinearProgress,
   Stack,
   Step,
   StepLabel,
@@ -59,9 +60,35 @@ const tradeTicket = [
   { label: 'Position size', value: '0.7% NAV' }
 ];
 
+const processHandlers = [
+  { name: 'Ingestion Handler', state: 'streaming', throughput: '128 ticks/s', progress: 88 },
+  { name: 'Strategy Handler', state: 'active', throughput: '36 eval/s', progress: 71 },
+  { name: 'Risk Handler', state: 'guarding', throughput: '14 checks/s', progress: 93 },
+  { name: 'Execution Handler', state: 'queued', throughput: 'Awaiting trigger', progress: 42 }
+];
+
+const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA?.slice(0, 7) ?? 'local';
+
+const glassCardSx = {
+  border: '1px solid',
+  borderColor: 'rgba(148, 163, 184, 0.24)',
+  bgcolor: 'rgba(15, 23, 42, 0.52)',
+  backdropFilter: 'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  boxShadow: '0 20px 45px rgba(15, 23, 42, 0.28)'
+};
+
 export default function HomePage() {
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        py: { xs: 4, md: 8 },
+        bgcolor: 'background.default',
+        backgroundImage:
+          'radial-gradient(circle at 15% 20%, rgba(96,165,250,0.22), transparent 45%), radial-gradient(circle at 85% 15%, rgba(245,158,11,0.2), transparent 42%), linear-gradient(180deg, #0b0f14 0%, #0f172a 100%)'
+      }}
+    >
       <Container maxWidth="lg">
         <Stack spacing={4}>
           <Stack
@@ -82,6 +109,12 @@ export default function HomePage() {
                 validate signals, approve risk, and publish execution details in a single,
                 self-explanatory flow.
               </Typography>
+              <Chip
+                label={`Build ${buildSha}`}
+                size="small"
+                variant="outlined"
+                sx={{ mt: 2, borderColor: 'rgba(148, 163, 184, 0.45)' }}
+              />
             </Box>
             <Stack direction="row" spacing={2}>
               <Button variant="outlined" color="inherit">
@@ -91,10 +124,98 @@ export default function HomePage() {
             </Stack>
           </Stack>
 
+          <Card elevation={0} sx={glassCardSx}>
+            <CardContent>
+              <Stack spacing={2.5}>
+                <Stack
+                  direction={{ xs: 'column', md: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', md: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="h6" fontWeight={700}>
+                      Continuous flow process handler
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                      Event-driven pipeline running in real time to make execution feel always-on.
+                    </Typography>
+                  </Box>
+                  <Chip color="success" label="Realtime stream online" />
+                </Stack>
+
+                <Box
+                  sx={{
+                    height: 6,
+                    borderRadius: 999,
+                    overflow: 'hidden',
+                    position: 'relative',
+                    bgcolor: 'rgba(148, 163, 184, 0.2)',
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      inset: 0,
+                      background:
+                        'linear-gradient(90deg, rgba(96,165,250,0.18) 0%, rgba(96,165,250,0.95) 48%, rgba(245,158,11,0.9) 100%)',
+                      animation: 'flowWave 2.4s linear infinite',
+                      transformOrigin: 'left center'
+                    },
+                    '@keyframes flowWave': {
+                      '0%': { transform: 'translateX(-45%) scaleX(0.8)' },
+                      '100%': { transform: 'translateX(110%) scaleX(1.05)' }
+                    }
+                  }}
+                />
+
+                <Grid container spacing={2}>
+                  {processHandlers.map((handler) => (
+                    <Grid item xs={12} md={6} key={handler.name}>
+                      <Box
+                        sx={{
+                          p: 2,
+                          borderRadius: 2,
+                          border: '1px solid rgba(148, 163, 184, 0.22)',
+                          bgcolor: 'rgba(15, 23, 42, 0.42)'
+                        }}
+                      >
+                        <Stack direction="row" justifyContent="space-between" alignItems="center">
+                          <Typography fontWeight={600}>{handler.name}</Typography>
+                          <Chip
+                            size="small"
+                            label={handler.state}
+                            color={handler.state === 'queued' ? 'default' : 'primary'}
+                          />
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                          {handler.throughput}
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={handler.progress}
+                          sx={{
+                            mt: 1.5,
+                            height: 8,
+                            borderRadius: 999,
+                            bgcolor: 'rgba(148, 163, 184, 0.2)',
+                            '& .MuiLinearProgress-bar': {
+                              borderRadius: 999,
+                              background:
+                                'linear-gradient(90deg, rgba(96,165,250,1) 0%, rgba(245,158,11,0.95) 100%)'
+                            }
+                          }}
+                        />
+                      </Box>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Stack>
+            </CardContent>
+          </Card>
+
           <Grid container spacing={3}>
             {insights.map((metric) => (
               <Grid item xs={12} md={4} key={metric.label}>
-                <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+                <Card elevation={0} sx={glassCardSx}>
                   <CardContent>
                     <Typography color="text.secondary" variant="subtitle2">
                       {metric.label}
@@ -116,7 +237,7 @@ export default function HomePage() {
 
           <Grid container spacing={3}>
             <Grid item xs={12} md={7}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Stack spacing={3}>
                     <Box>
@@ -160,7 +281,7 @@ export default function HomePage() {
               </Card>
             </Grid>
             <Grid item xs={12} md={5}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Trade ticket
@@ -192,7 +313,7 @@ export default function HomePage() {
 
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Signal stack
@@ -221,7 +342,7 @@ export default function HomePage() {
               </Card>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+              <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={600}>
                     Live watchlist
