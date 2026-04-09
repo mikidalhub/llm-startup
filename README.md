@@ -78,3 +78,24 @@ Edit `config.yaml`:
 - `outputPath`
 
 See `docs/INVESTMENT_PLATFORM_BLUEPRINT.md` for architecture, formulas, UX, and roadmap.
+
+## Deploy to GitHub Pages (free tier)
+This repo now includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml` that can deploy the Next.js UI to GitHub Pages.
+
+### What GitHub Actions does (simple)
+- It is GitHub's built-in automation runner.
+- When you push to `main`, it runs steps for you: install, test, build, and deploy.
+- You do not need to run deployment commands manually each time.
+
+### Free-tier friendly setup
+- Uses GitHub-hosted runners and GitHub Pages (both available on GitHub Free).
+- Keeps one small job (test + build + deploy) to minimize action minutes.
+- Uses dependency caching (`npm`) to speed up future runs.
+
+### One-time repo settings
+1. Push this code to GitHub.
+2. In GitHub, open **Settings → Pages**.
+3. Under **Build and deployment**, select **GitHub Actions** as the source.
+4. Push to `main` (or run the workflow manually in the **Actions** tab).
+
+After a successful run, your site URL will appear in the workflow summary.

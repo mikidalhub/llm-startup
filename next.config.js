@@ -11,7 +11,11 @@ if (isProduction) {
 }
 
 const nextConfig = {
-  reactStrictMode: true
+  reactStrictMode: true,
+  output: 'export',
+  images: {
+    unoptimized: true
+  }
 };
 
 export default withPwa(nextConfig);
