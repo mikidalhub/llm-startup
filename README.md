@@ -91,6 +91,7 @@ This repo now includes a GitHub Actions workflow at `.github/workflows/deploy-pa
 - Uses GitHub-hosted runners and GitHub Pages (both available on GitHub Free).
 - Keeps one small job (test + build + deploy) to minimize action minutes.
 - Uses dependency caching (`npm`) to speed up future runs.
+- Automatically detects GitHub Pages subpath (`/<repo>`) for project pages so static assets load correctly.
 
 ### One-time repo settings
 1. Push this code to GitHub.
