@@ -96,3 +96,13 @@ After deployment, Cloud Run prints a URL similar to:
 
 The server reads `PORT` from environment and defaults to `8080` for Cloud Run.
 The deployment script also sets `CORS_ALLOWED_ORIGIN` on Cloud Run so your deployed GitHub frontend can call backend APIs without browser CORS errors.
+
+## Connect GitHub Pages frontend to Cloud Run backend
+
+When frontend and backend run on different domains (for example, `https://mikidalhub.github.io/llm-startup` for frontend and `https://SERVICE-NAME-xxxxx-uc.a.run.app` for backend), configure the frontend with:
+
+```bash
+NEXT_PUBLIC_API_ORIGIN=https://SERVICE-NAME-xxxxx-uc.a.run.app
+```
+
+Without this variable, the frontend uses same-origin calls (for example `/api/process/start`), which on GitHub Pages resolves to the GitHub Pages domain and not to Cloud Run.

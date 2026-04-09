@@ -58,12 +58,24 @@ type FeedEvent = {
 const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA?.slice(0, 7) ?? 'local';
 
 const glassCardSx = {
+  position: 'relative',
+  overflow: 'hidden',
   border: '1px solid',
-  borderColor: 'rgba(148, 163, 184, 0.24)',
-  bgcolor: 'rgba(255, 255, 255, 0.34)',
+  borderColor: 'rgba(148, 163, 184, 0.3)',
+  bgcolor: 'rgba(255, 255, 255, 0.22)',
+  backgroundImage:
+    'linear-gradient(120deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 32%, rgba(148,163,184,0.08) 100%)',
   backdropFilter: 'blur(20px) saturate(150%)',
   WebkitBackdropFilter: 'blur(20px) saturate(150%)',
-  boxShadow: '0 24px 60px rgba(15, 23, 42, 0.12)'
+  boxShadow: '0 24px 60px rgba(15, 23, 42, 0.2), inset 0 1px 0 rgba(255,255,255,0.45)',
+  '&::before': {
+    content: '""',
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    borderRadius: 'inherit',
+    background: 'radial-gradient(circle at top right, rgba(125,211,252,0.3), transparent 40%)'
+  }
 };
 
 const toneColorMap: Record<FeedEvent['tone'], 'default' | 'info' | 'success' | 'warning' | 'error'> = {
@@ -87,6 +99,20 @@ const getBasePath = () => {
   return `/${firstSegment}`;
 };
 
+const getApiBaseUrl = () => {
+  const explicitOrigin = process.env.NEXT_PUBLIC_API_ORIGIN?.trim();
+  if (explicitOrigin) return explicitOrigin.replace(/\/+$/, '');
+
+  const basePath = getBasePath();
+  if (typeof window === 'undefined') return basePath;
+  return `${window.location.origin}${basePath}`;
+};
+
+const getApiUrl = (baseUrl: string, path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${baseUrl}${normalizedPath}`;
+};
+
 export default function HomePage() {
   const [activeWheelStep, setActiveWheelStep] = useState(0);
   const [eventMessage, setEventMessage] = useState('Bootstrapping autonomous pipeline...');
@@ -94,6 +120,7 @@ export default function HomePage() {
   const [currentTrades, setCurrentTrades] = useState<TradingRow[]>([]);
   const [streamMode, setStreamMode] = useState<StreamMode>('connecting');
   const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
 
   const pushEvent = (message: string, tone: FeedEvent['tone']) => {
     setEventFeed((prev) => [{ message, tone, at: new Date().toISOString() }, ...prev].slice(0, 6));
@@ -156,15 +183,15 @@ export default function HomePage() {
     let eventSource: EventSource | null = null;
 
     const forceLive = new URLSearchParams(window.location.search).get('live') === '1';
-    const shouldUseFallbackOnly = window.location.hostname.endsWith('github.io') && !forceLive;
+    const hasExplicitApiOrigin = Boolean(process.env.NEXT_PUBLIC_API_ORIGIN);
+    const shouldUseFallbackOnly = window.location.hostname.endsWith('github.io') && !forceLive && !hasExplicitApiOrigin;
 
     if (shouldUseFallbackOnly) {
       setStreamMode('fallback');
       fallbackInterval = runFallbackTicker();
     } else {
       try {
-        const basePath = getBasePath();
-        eventSource = new EventSource(`${basePath}/events`);
+        eventSource = new EventSource(getApiUrl(apiBaseUrl, '/events'));
         eventSource.onopen = () => {
           setStreamMode('live');
           setEventMessage('Connected to backend event stream.');
@@ -191,13 +218,12 @@ export default function HomePage() {
       if (fallbackInterval) window.clearInterval(fallbackInterval);
       eventSource?.close();
     };
-  }, []);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     const abortController = new AbortController();
 
     const loadTrades = async () => {
-      const basePath = getBasePath();
       const fallbackTrades: TradingRow[] = [
         { symbol: 'AAPL', side: 'BUY', quantity: 22, price: 198.41, timestamp: new Date().toISOString() },
         {
@@ -217,7 +243,7 @@ export default function HomePage() {
       ];
 
       try {
-        const response = await fetch(`${basePath}/api/trades`, { signal: abortController.signal });
+        const response = await fetch(getApiUrl(apiBaseUrl, '/api/trades'), { signal: abortController.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = (await response.json()) as Partial<TradingRow>[];
         const normalized = data
@@ -242,7 +268,7 @@ export default function HomePage() {
     return () => {
       abortController.abort();
     };
-  }, []);
+  }, [apiBaseUrl]);
 
   const wheelNodes = useMemo(
     () => [
@@ -258,9 +284,8 @@ export default function HomePage() {
   const wheelAngle = -90 + (wheelProgress / 100) * 360;
 
   const triggerProcessTick = async () => {
-    const basePath = getBasePath();
     try {
-      const response = await fetch(`${basePath}/api/process/start`, { method: 'POST' });
+      const response = await fetch(getApiUrl(apiBaseUrl, '/api/process/start'), { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setEventMessage('Manual backend tick requested.');
       pushEvent('Manual backend tick requested.', 'info');
@@ -292,6 +317,9 @@ export default function HomePage() {
               </Typography>
               <Typography sx={{ mt: 0.5, color: 'rgba(226, 232, 240, 0.85)' }}>
                 Key status only: wheel position, risk posture, live events, and latest fills.
+              </Typography>
+              <Typography sx={{ mt: 0.5, color: 'rgba(186, 230, 253, 0.95)' }}>
+                Backend endpoint: <strong>{apiBaseUrl || '(same-origin root)'}</strong>
               </Typography>
             </Box>
             <Chip label={`Build ${buildSha}`} size="small" sx={{ color: '#e2e8f0', borderColor: 'rgba(226,232,240,0.4)' }} variant="outlined" />
@@ -470,68 +498,84 @@ export default function HomePage() {
             <Grid item xs={12}>
               <Card elevation={0} sx={glassCardSx}>
                 <CardContent>
-                  <Grid container spacing={2} alignItems="stretch">
-                    <Grid item xs={12} md={8}>
-                      <Typography variant="h6" fontWeight={700}>
-                        Latest fills
-                      </Typography>
-                      <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
-                        {currentTrades.map((trade) => (
-                          <Grid item xs={12} sm={4} key={`${trade.symbol}-${trade.timestamp}`}>
-                            <Stack
-                              direction="row"
-                              justifyContent="space-between"
-                              alignItems="center"
-                              sx={{ px: 1.5, py: 1.1, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.58)' }}
-                            >
-                              <Box>
-                                <Typography fontWeight={600}>{trade.symbol}</Typography>
-                                <Typography variant="caption" sx={{ display: 'block', color: 'rgba(100, 116, 139, 0.95)' }}>
-                                  {symbolDetails[trade.symbol] ?? 'US Equity · Live feed'}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {new Date(trade.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}{' '}
-                                  UTC
-                                </Typography>
-                              </Box>
-                              <Stack alignItems="flex-end" spacing={0.4}>
-                                <Chip size="small" label={`${trade.side} ${trade.quantity}`} color={trade.side === 'SELL' ? 'error' : 'success'} />
-                                <Typography variant="body2" fontWeight={700}>
-                                  ${trade.price.toFixed(2)}
-                                </Typography>
-                              </Stack>
-                            </Stack>
-                          </Grid>
-                        ))}
+                  <Typography variant="h6" fontWeight={700}>
+                    Latest fills
+                  </Typography>
+                  <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
+                    {currentTrades.map((trade) => (
+                      <Grid item xs={12} sm={4} key={`${trade.symbol}-${trade.timestamp}`}>
+                        <Stack
+                          direction="row"
+                          justifyContent="space-between"
+                          alignItems="center"
+                          sx={{ px: 1.5, py: 1.1, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.58)' }}
+                        >
+                          <Box>
+                            <Typography fontWeight={600}>{trade.symbol}</Typography>
+                            <Typography variant="caption" sx={{ display: 'block', color: 'rgba(100, 116, 139, 0.95)' }}>
+                              {symbolDetails[trade.symbol] ?? 'US Equity · Live feed'}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(trade.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}{' '}
+                              UTC
+                            </Typography>
+                          </Box>
+                          <Stack alignItems="flex-end" spacing={0.4}>
+                            <Chip size="small" label={`${trade.side} ${trade.quantity}`} color={trade.side === 'SELL' ? 'error' : 'success'} />
+                            <Typography variant="body2" fontWeight={700}>
+                              ${trade.price.toFixed(2)}
+                            </Typography>
+                          </Stack>
+                        </Stack>
                       </Grid>
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <Typography variant="h6" fontWeight={700}>
-                        At-a-glance metrics
-                      </Typography>
-                      <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
-                        {insights.map((metric) => (
-                          <Grid item xs={4} md={12} key={metric.label}>
-                            <Stack
-                              direction={{ xs: 'column', md: 'row' }}
-                              justifyContent="space-between"
-                              alignItems={{ xs: 'flex-start', md: 'center' }}
-                              sx={{ p: 1.2, borderRadius: 2, bgcolor: 'rgba(248,250,252,0.62)', border: '1px solid rgba(148, 163, 184, 0.2)' }}
-                            >
-                              <Box>
-                                <Typography variant="caption" color="text.secondary">
-                                  {metric.label}
-                                </Typography>
-                                <Typography variant="h6" fontWeight={700}>
-                                  {metric.value}
-                                </Typography>
-                              </Box>
-                              <Chip label={metric.change} color={metric.change.startsWith('-') ? 'warning' : 'success'} size="small" />
-                            </Stack>
-                          </Grid>
-                        ))}
+                    ))}
+                  </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12}>
+              <Card
+                elevation={0}
+                sx={{
+                  ...glassCardSx,
+                  borderColor: 'rgba(56, 189, 248, 0.34)',
+                  boxShadow: '0 20px 50px rgba(2, 132, 199, 0.2), inset 0 1px 0 rgba(255,255,255,0.58)'
+                }}
+              >
+                <CardContent>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6" fontWeight={700}>
+                      At-a-glance metrics
+                    </Typography>
+                    <Chip label="Quick pulse" color="info" size="small" />
+                  </Stack>
+                  <Grid container spacing={1.2} sx={{ mt: 0.5 }}>
+                    {insights.map((metric) => (
+                      <Grid item xs={12} sm={4} key={metric.label}>
+                        <Stack
+                          direction="row"
+                          justifyContent="space-between"
+                          alignItems="center"
+                          sx={{
+                            p: 1.5,
+                            borderRadius: 2,
+                            bgcolor: 'rgba(248,250,252,0.68)',
+                            border: '1px solid rgba(125, 211, 252, 0.45)',
+                            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)'
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">
+                              {metric.label}
+                            </Typography>
+                            <Typography variant="h5" fontWeight={800}>
+                              {metric.value}
+                            </Typography>
+                          </Box>
+                          <Chip label={metric.change} color={metric.change.startsWith('-') ? 'warning' : 'success'} size="small" />
+                        </Stack>
                       </Grid>
-                    </Grid>
+                    ))}
                   </Grid>
                 </CardContent>
               </Card>
