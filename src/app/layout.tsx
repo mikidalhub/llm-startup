@@ -4,11 +4,11 @@ import ThemeRegistry from './theme-registry';
 export const metadata: Metadata = {
   title: 'Nimbus Ops Dashboard',
   description: 'Offline-capable operations dashboard for a startup team.',
-  manifest: '/manifest.webmanifest'
+  manifest: 'manifest.webmanifest'
 };
 
 export const viewport = {
-  themeColor: '#0b0f14'
+  themeColor: '#e2e8f0'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
