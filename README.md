@@ -72,5 +72,5 @@ GitHub Pages cannot run Node.js servers or containers. It only hosts static file
 
 Container-based free-tier path:
 1. Build/push backend image to GHCR from GitHub Actions.
-2. Run that image on free compute (Render, Railway, Fly.io, Cloud Run free tier).
+2. Run that image on free compute (Render, Railway, Fly.io).
 3. Point frontend to backend with `NEXT_PUBLIC_API_ORIGIN`.
