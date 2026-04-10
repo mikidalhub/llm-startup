@@ -31,15 +31,15 @@ This plan starts from an empty repository and produces a Revolut-style, value-fi
 - Use this script to mimic real-time updates without paid infrastructure.
 
 ## Step 5 — GitHub Actions workflows
-- Keep deployment workflow in `/.github/workflows/deploy-pages.yml` to build and publish every push.
-- Add `/.github/workflows/update-demo-data.yml` to run daily on cron and update JSON snapshots.
+- Use `/.github/workflows/deploy-full-stack.yml` for one-shot FE+BE deployment on each push.
+- Keep `/.github/workflows/update-demo-data.yml` to run daily on cron and update JSON snapshots.
 - Push commits from workflow only when data changed.
 
 ## Step 6 — Repository structure target
 - `/src/app` — UI pages and layout.
 - `/public/data` — static JSON snapshots.
 - `/scripts` — refresh and analytics scripts.
-- `/.github/workflows` — CI/CD and scheduled automation.
+- `/.github/workflows` — one-shot FE+BE deploy + scheduled automation.
 - `/docs` — architecture and onboarding runbooks.
 
 ## Step 7 — User path (zero-cost start)

@@ -1,29 +1,36 @@
 # Backend Deployment on GitHub-Centric Free Tier
 
-## Important constraint
+## Simple architecture
+- **Code** in GitHub repository
+- **Container image** in GHCR (`ghcr.io/<owner>/<repo>-backend`)
+- **Running app** on free runtime such as Render, Railway, or Fly.io
+- **Frontend** on GitHub Pages
+
+## Constraint you must know
 GitHub Pages only serves static files. It cannot run `server.js`, SSE streams, or containerized backend processes.
 
-## What we can do on free tier
-1. **Frontend on GitHub Pages** (`deploy-pages.yml`) for zero-cost static hosting.
-2. **Backend image on GHCR** (GitHub Container Registry) using GitHub Actions.
-3. **Run container on a free compute host** (for example Cloud Run free tier, Fly.io trial/free allocations, Render free web service when available), while keeping source, CI, and image delivery GitHub-centric.
+## One-shot deployment path
+Use `.github/workflows/deploy-full-stack.yml`:
+1. Build + deploy frontend to GitHub Pages
+2. Build + push backend image to GHCR
+3. Trigger optional deploy hook for Render / Railway / Fly.io
 
-## Existing backend in this repo
+This gives the closest possible “single push” full-stack deploy while remaining GitHub-centric.
+
+## Configure provider hooks (optional but recommended)
+Set any of these repository secrets:
+- `RENDER_DEPLOY_HOOK_URL`
+- `RAILWAY_DEPLOY_HOOK_URL`
+- `FLY_DEPLOY_HOOK_URL`
+
+When set, the one-shot workflow calls the webhook after publishing the new GHCR image.
+
+## Existing backend runtime in this repo
 - Entry point: `server.js`
-- HTTP + SSE API server: `app-server.js`
-- Docker build target: `Dockerfile`
+- API/SSE server: `app-server.js`
+- Container spec: `Dockerfile`
 
-## Recommended container flow
-1. Push code to GitHub.
-2. Action builds backend container and pushes to `ghcr.io/<owner>/<repo>-backend`.
-3. External free compute pulls image from GHCR and runs it.
-4. Set `NEXT_PUBLIC_API_ORIGIN` in frontend deploy workflow to that backend URL.
-
-## Minimal environment variables for backend runtime
-- `PORT` (usually injected by host)
-- `CORS_ALLOWED_ORIGIN` (set to your Pages URL)
-- Optional strategy settings from `config.yaml`
-
-## Why this is still GitHub-friendly
-- Source, PRs, Actions, package/image registry, and frontend hosting all stay on GitHub.
-- Only stateless compute execution is external, which is unavoidable for a live Node backend.
+## Runtime environment variables
+- `PORT` (usually injected by platform)
+- `CORS_ALLOWED_ORIGIN` (set to your GitHub Pages URL)
+- Any strategy/runtime variables from `config.yaml`
