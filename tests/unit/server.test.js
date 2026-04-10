@@ -13,7 +13,8 @@ const mockState = {
 
 const buildMockEngine = () => ({
   getState: () => mockState,
-  onUpdate: () => () => {}
+  onUpdate: () => () => {},
+  tick: () => {}
 });
 
 const requestJson = async (port, path) => {
@@ -48,6 +49,41 @@ test('createServer exposes JSON APIs', async () => {
     assert.equal(portfolioResponse.status, 200);
     assert.equal(portfolioResponse.json.portfolioValue, 0);
     assert.deepEqual(portfolioResponse.json.positions, {});
+
+    const healthResponse = await requestJson(port, '/api/health');
+    assert.equal(healthResponse.status, 200);
+    assert.equal(healthResponse.json.status, 'ok');
+    assert.equal(healthResponse.json.container, 'running');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('createServer accepts process start triggers', async () => {
+  let tickReason = '';
+  const server = createServer({
+    engine: {
+      ...buildMockEngine(),
+      tick: (reason) => {
+        tickReason = reason;
+      }
+    },
+    publicDir: new URL('../../public/', import.meta.url)
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  try {
+    const triggerResponse = await fetch(`http://127.0.0.1:${port}/api/process/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'TEST_TRIGGER' })
+    });
+    const triggerJson = await triggerResponse.json();
+    assert.equal(triggerResponse.status, 200);
+    assert.equal(triggerJson.status, 'started');
+    assert.equal(tickReason, 'TEST_TRIGGER');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

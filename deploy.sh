@@ -45,4 +45,13 @@ gcloud run deploy "$SERVICE_NAME" \
   --min-instances 0 \
   --max-instances 3
 
+SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')"
 echo "Deployment complete."
+echo "Service URL: $SERVICE_URL"
+echo "Checking backend health..."
+curl -fsS "$SERVICE_URL/api/health" | sed 's/^/  /'
+echo "Triggering backend process start..."
+curl -fsS -X POST "$SERVICE_URL/api/process/start" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"DEPLOY_CHECK"}' | sed 's/^/  /'
+echo "Done. Backend is deployed, reachable, and process start endpoint accepted the trigger."

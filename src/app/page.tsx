@@ -124,11 +124,11 @@ const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const getApiUrl = (path: string) => `${getApiBaseUrl()}${path}`;
 
 const orbStyles = [
-  { top: '10%', left: '50%', delay: '0s' },
-  { top: '26%', left: '77%', delay: '-2.4s' },
-  { top: '60%', left: '78%', delay: '-4.8s' },
-  { top: '78%', left: '48%', delay: '-7.2s' },
-  { top: '58%', left: '20%', delay: '-9.6s' }
+  { top: '12%', left: '50%' },
+  { top: '30%', left: '79%' },
+  { top: '64%', left: '76%' },
+  { top: '76%', left: '40%' },
+  { top: '48%', left: '14%' }
 ];
 
 export default function HomePage() {
@@ -223,10 +223,6 @@ export default function HomePage() {
         py: { xs: 2, md: 5 },
         overflow: 'hidden',
         background: 'radial-gradient(circle at top right, #f8f4ff 5%, #eef6ff 42%, #ebf8f7 100%)',
-        '@keyframes spinWheel': {
-          from: { transform: 'rotate(0deg)' },
-          to: { transform: 'rotate(360deg)' }
-        },
         '@keyframes trailPulse': {
           '0%, 100%': { opacity: 0.35 },
           '50%': { opacity: 0.85 }
@@ -265,9 +261,10 @@ export default function HomePage() {
                 <Box
                   sx={{
                     width: { xs: 300, md: 360 },
-                    height: { xs: 300, md: 360 },
+                    aspectRatio: '1 / 1',
                     borderRadius: '50%',
                     position: 'relative',
+                    flexShrink: 0,
                     border: '1px solid rgba(255,255,255,0.56)',
                     background: 'radial-gradient(circle at 40% 30%, rgba(255,255,255,0.5), rgba(255,255,255,0.08))',
                     boxShadow: 'inset 0 0 30px rgba(255,255,255,0.38), 0 20px 40px rgba(93,128,176,0.18)'
@@ -290,7 +287,18 @@ export default function HomePage() {
                       }
                     }}
                   />
-                  <Box sx={{ position: 'absolute', inset: 0, animation: running ? 'spinWheel 3s linear infinite' : 'none' }}>
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      inset: '4%',
+                      borderRadius: '50%',
+                      border: '6px solid rgba(148, 163, 184, 0.25)',
+                      borderTopColor: '#2563eb',
+                      transform: `rotate(${(activePhase / phases.length) * 360}deg)`,
+                      transition: 'transform 400ms ease'
+                    }}
+                  />
+                  <Box sx={{ position: 'absolute', inset: 0 }}>
                     {orbStyles.map((orb, index) => (
                       <Box
                         key={`${orb.top}-${orb.left}`}
@@ -309,9 +317,7 @@ export default function HomePage() {
                           placeItems: 'center'
                         }}
                       >
-                        <Typography variant="caption" sx={{ position: 'absolute', top: '118%', left: '50%', transform: 'translateX(-50%)', color: 'rgba(30,41,59,0.72)', width: 110, textAlign: 'center' }}>
-                          {phases[index].label}
-                        </Typography>
+                        <Typography variant="caption" fontWeight={700}>{index + 1}</Typography>
                       </Box>
                     ))}
                   </Box>
@@ -335,6 +341,23 @@ export default function HomePage() {
                     <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)', textAlign: 'center', px: 1 }}>{phases[activePhase].label}</Typography>
                   </Box>
                 </Box>
+                <Stack spacing={0.75} sx={{ minWidth: { md: 220 }, maxWidth: 260 }}>
+                  {phases.map((phase, index) => (
+                    <Box
+                      key={phase.label}
+                      sx={{
+                        px: 1.2,
+                        py: 0.7,
+                        borderRadius: 2,
+                        border: index === activePhase ? '1px solid rgba(37,99,235,0.35)' : '1px solid rgba(255,255,255,0.5)',
+                        background: index === activePhase ? 'rgba(219,234,254,0.7)' : 'rgba(255,255,255,0.3)'
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ color: 'rgba(15, 23, 42, 0.62)' }}>Step {index + 1}</Typography>
+                      <Typography variant="body2" fontWeight={600}>{phase.label}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
               </Stack>
 
               <Card elevation={0} sx={glassCardSx}>
