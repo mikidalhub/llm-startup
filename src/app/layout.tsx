@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import ThemeRegistry from './theme-registry';
 
 export const metadata: Metadata = {
-  title: 'Live Trading Control Center',
-  description: 'Realtime trading operations dashboard focused on wheel state, server events, risk and executions.',
+  title: 'Value-Driven Trading Advisor',
+  description: 'Revolut-style free-tier trading and learning sandbox deployed on GitHub Pages.',
   manifest: 'manifest.webmanifest'
 };
 

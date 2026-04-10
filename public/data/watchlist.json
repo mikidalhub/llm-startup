@@ -1,0 +1,42 @@
+[
+  {
+    "ticker": "BRK.B",
+    "region": "US",
+    "fairValueRange": "$420-$450",
+    "marginOfSafety": "15%-22%",
+    "positionSize": "8%-12%",
+    "riskBand": "Low"
+  },
+  {
+    "ticker": "GOOGL",
+    "region": "US",
+    "fairValueRange": "$165-$185",
+    "marginOfSafety": "12%-18%",
+    "positionSize": "6%-9%",
+    "riskBand": "Medium"
+  },
+  {
+    "ticker": "TLV",
+    "region": "Romania",
+    "fairValueRange": "RON 25-RON 29",
+    "marginOfSafety": "10%-16%",
+    "positionSize": "3%-5%",
+    "riskBand": "Medium"
+  },
+  {
+    "ticker": "SNN",
+    "region": "Romania",
+    "fairValueRange": "RON 49-RON 55",
+    "marginOfSafety": "14%-20%",
+    "positionSize": "2%-4%",
+    "riskBand": "Low"
+  },
+  {
+    "ticker": "ASML",
+    "region": "Europe",
+    "fairValueRange": "EUR 760-EUR 860",
+    "marginOfSafety": "8%-14%",
+    "positionSize": "3%-6%",
+    "riskBand": "High"
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Intrinsic value check",
+    "summary": "Start each idea with fair-value range and explicit assumptions.",
+    "action": "Next step: Fork the GitHub repo and edit /public/data/watchlist.json with your own valuation ranges."
+  },
+  {
+    "title": "Risk-first sizing",
+    "summary": "Size based on drawdown tolerance first, conviction second.",
+    "action": "Next step: Use demo mode for 30 sessions before enabling any live broker feature flag."
+  },
+  {
+    "title": "Weekly review cadence",
+    "summary": "Track KPI drift and rebalance only on scheduled review windows.",
+    "action": "Next step: Enable scheduled GitHub Action updates to refresh static JSON snapshots daily."
+  }
+]
