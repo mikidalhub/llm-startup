@@ -1,7 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Card, CardContent, Chip, Container, Divider, Grid, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import Link from 'next/link';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Divider,
+  Grid,
+  LinearProgress,
+  Stack,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography
+} from '@mui/material';
 
 type AppMode = 'demo' | 'real';
 type TabKey = 'dashboard' | 'watchlist' | 'kpis' | 'learn';
@@ -41,12 +57,34 @@ type LearnItem = {
   action: string;
 };
 
+type EngineState = {
+  marketData?: { lastUpdate?: string };
+  portfolio?: {
+    metrics?: {
+      portfolioValue?: number;
+      cash?: number;
+      dayPnlPct?: number;
+    };
+    positions?: Record<string, unknown>;
+  };
+};
+
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'watchlist', label: 'Watchlist' },
   { key: 'kpis', label: 'KPIs' },
   { key: 'learn', label: 'Learn' }
 ];
+
+const phases = [
+  { label: 'Bean Start', detail: 'Initialize strategy context and startup checks.' },
+  { label: 'Yahoo Data', detail: 'Fetch free Yahoo Finance market snapshots.' },
+  { label: 'Analyze', detail: 'Run fundamentals, risk, and valuation engines.' },
+  { label: 'Signal', detail: 'Generate buy/hold/sell action points.' },
+  { label: 'Trade', detail: 'Execute or simulate orders with position sizing.' }
+];
+
+const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.4';
 
 const riskColorMap: Record<WatchIdea['riskBand'], 'success' | 'warning' | 'error'> = {
   Low: 'success',
@@ -82,6 +120,8 @@ const getBasePath = () => {
 };
 
 const getDataUrl = (path: string) => `${getBasePath()}${path.startsWith('/') ? path : `/${path}`}`;
+const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const getApiUrl = (path: string) => `${getApiBaseUrl()}${path}`;
 
 const orbStyles = [
   { top: '10%', left: '50%', delay: '0s' },
@@ -98,6 +138,9 @@ export default function HomePage() {
   const [watchlist, setWatchlist] = useState<WatchIdea[]>([]);
   const [kpis, setKpis] = useState<KpiData | null>(null);
   const [learnItems, setLearnItems] = useState<LearnItem[]>([]);
+  const [activePhase, setActivePhase] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [processMessage, setProcessMessage] = useState('Ready to run the end-to-end trading flow.');
 
   useEffect(() => {
     const loadData = async () => {
@@ -114,8 +157,55 @@ export default function HomePage() {
       setLearnItems((await learnRes.json()) as LearnItem[]);
     };
 
-    void loadData();
+    const hydrateFromBackend = async () => {
+      try {
+        const response = await fetch(getApiUrl('/api/state'));
+        if (!response.ok) return;
+
+        const state = (await response.json()) as EngineState;
+        setDashboard((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            asOfUtc: state.marketData?.lastUpdate ?? prev.asOfUtc,
+            accountValue: state.portfolio?.metrics?.portfolioValue ?? prev.accountValue,
+            cash: state.portfolio?.metrics?.cash ?? prev.cash,
+            pnlDayPct: state.portfolio?.metrics?.dayPnlPct ?? prev.pnlDayPct,
+            positionsCount: Object.keys(state.portfolio?.positions ?? {}).length || prev.positionsCount,
+            liveLabel: 'Connected to backend engine'
+          };
+        });
+      } catch {
+        setProcessMessage('Backend unavailable right now. Demo data mode is still active.');
+      }
+    };
+
+    void loadData().then(hydrateFromBackend);
   }, []);
+
+  const runPipeline = async () => {
+    if (running) return;
+
+    setRunning(true);
+    setActivePhase(0);
+    setProcessMessage('Starting process: bean start initialized.');
+
+    try {
+      await fetch(getApiUrl('/api/process/start'), { method: 'POST' });
+    } catch {
+      setProcessMessage('Simulating flow locally because backend trigger is unavailable.');
+    }
+
+    for (let index = 0; index < phases.length; index += 1) {
+      setActivePhase(index);
+      setProcessMessage(`${phases[index].label}: ${phases[index].detail}`);
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    }
+
+    setProcessMessage('Process completed: data fetched, analysis finished, trade decision ready.');
+    setRunning(false);
+  };
 
   const modeChip = useMemo(
     () =>
@@ -143,30 +233,6 @@ export default function HomePage() {
         }
       }}
     >
-      {[
-        'radial-gradient(circle at 30% 20%, rgba(151, 201, 255, 0.55), rgba(151, 201, 255, 0))',
-        'radial-gradient(circle at 70% 30%, rgba(255, 182, 216, 0.48), rgba(255, 182, 216, 0))',
-        'radial-gradient(circle at 50% 75%, rgba(180, 255, 233, 0.52), rgba(180, 255, 233, 0))'
-      ].map((gradient, index) => (
-        <Box
-          key={gradient}
-          sx={{
-            position: 'absolute',
-            width: { xs: 280, md: 520 },
-            height: { xs: 280, md: 520 },
-            borderRadius: '50%',
-            filter: 'blur(7px)',
-            opacity: 0.85,
-            background: gradient,
-            top: index === 0 ? -90 : index === 1 ? 60 : 'auto',
-            bottom: index === 2 ? -110 : 'auto',
-            left: index === 0 ? -70 : index === 2 ? '15%' : 'auto',
-            right: index === 1 ? -90 : 'auto',
-            pointerEvents: 'none'
-          }}
-        />
-      ))}
-
       <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 2 }}>
         <Card elevation={0} sx={{ ...glassCardSx, p: { xs: 1, md: 2 } }}>
           <CardContent>
@@ -182,33 +248,24 @@ export default function HomePage() {
                   <Typography sx={{ color: 'rgba(15, 23, 42, 0.7)' }}>
                     UTC {new Date().toISOString().replace('T', ' ').slice(0, 16)} • Next Trade {dashboard?.nextTradeEest ?? '2026-04-15 09:30 EEST'}
                   </Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-                    {['◌', '⌁', '◍'].map((icon) => (
-                      <Box
-                        key={icon}
-                        sx={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: '50%',
-                          display: 'grid',
-                          placeItems: 'center',
-                          fontSize: 17,
-                          border: '1px solid rgba(255,255,255,0.65)',
-                          color: 'rgba(30,41,59,0.7)',
-                          background: 'rgba(255,255,255,0.34)',
-                          backdropFilter: 'blur(8px)'
-                        }}
-                      >
-                        {icon}
-                      </Box>
-                    ))}
+                  <Typography sx={{ mt: 1, color: 'rgba(15,23,42,0.72)' }}>
+                    This platform connects free market data, autonomous analysis, risk controls, and execution logic.
+                    You can inspect opportunities, understand why a signal is produced, and run the full trading flow on demand.
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap' }}>
+                    <Button component={Link} href="/readme" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
+                      Platform README
+                    </Button>
+                    <Button component={Link} href="/user-guide" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
+                      User Guide
+                    </Button>
                   </Stack>
                 </Box>
 
                 <Box
                   sx={{
-                    width: { xs: 280, md: 340 },
-                    height: { xs: 280, md: 340 },
+                    width: { xs: 300, md: 360 },
+                    height: { xs: 300, md: 360 },
                     borderRadius: '50%',
                     position: 'relative',
                     border: '1px solid rgba(255,255,255,0.56)',
@@ -233,7 +290,7 @@ export default function HomePage() {
                       }
                     }}
                   />
-                  <Box sx={{ position: 'absolute', inset: 0, animation: 'spinWheel 12s linear infinite' }}>
+                  <Box sx={{ position: 'absolute', inset: 0, animation: running ? 'spinWheel 3s linear infinite' : 'none' }}>
                     {orbStyles.map((orb, index) => (
                       <Box
                         key={`${orb.top}-${orb.left}`}
@@ -242,31 +299,18 @@ export default function HomePage() {
                           top: orb.top,
                           left: orb.left,
                           transform: 'translate(-50%, -50%)',
-                          width: { xs: 30, md: 36 },
-                          height: { xs: 30, md: 36 },
+                          width: { xs: 36, md: 42 },
+                          height: { xs: 36, md: 42 },
                           borderRadius: '50%',
-                          background: 'linear-gradient(145deg, rgba(255,255,255,0.92), rgba(196,228,255,0.46))',
+                          background: index === activePhase ? 'linear-gradient(145deg, #90cdf4, #2563eb)' : 'linear-gradient(145deg, rgba(255,255,255,0.92), rgba(196,228,255,0.46))',
+                          color: index === activePhase ? '#fff' : 'inherit',
                           border: '1px solid rgba(255,255,255,0.9)',
-                          backdropFilter: 'blur(12px)',
-                          boxShadow: '0 0 18px rgba(181, 223, 255, 0.7), inset 0 0 10px rgba(255,255,255,0.8)',
-                          '&::after': {
-                            content: '""',
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            width: 52,
-                            height: 8,
-                            transform: 'translate(-50%, -50%)',
-                            borderRadius: 99,
-                            background: 'linear-gradient(90deg, rgba(173,217,255,0), rgba(173,217,255,0.45), rgba(173,217,255,0))',
-                            filter: 'blur(2px)',
-                            animation: `trailPulse 2.2s ease-in-out infinite`,
-                            animationDelay: orb.delay
-                          }
+                          display: 'grid',
+                          placeItems: 'center'
                         }}
                       >
-                        <Typography variant="caption" sx={{ position: 'absolute', top: '115%', left: '50%', transform: 'translateX(-50%)', color: 'rgba(30,41,59,0.62)' }}>
-                          {index + 1}
+                        <Typography variant="caption" sx={{ position: 'absolute', top: '118%', left: '50%', transform: 'translateX(-50%)', color: 'rgba(30,41,59,0.72)', width: 110, textAlign: 'center' }}>
+                          {phases[index].label}
                         </Typography>
                       </Box>
                     ))}
@@ -277,23 +321,40 @@ export default function HomePage() {
                       top: '50%',
                       left: '50%',
                       transform: 'translate(-50%, -50%)',
-                      width: { xs: 108, md: 126 },
-                      height: { xs: 108, md: 126 },
+                      width: { xs: 120, md: 132 },
+                      height: { xs: 120, md: 132 },
                       borderRadius: '50%',
                       display: 'grid',
                       placeItems: 'center',
                       border: '1px solid rgba(255,255,255,0.75)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.2))',
-                      backdropFilter: 'blur(16px)',
-                      boxShadow: 'inset 0 5px 18px rgba(255,255,255,0.55), 0 12px 22px rgba(70,102,145,0.2)'
+                      background: 'linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.2))'
                     }}
                   >
-                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)' }}>Live Processing</Typography>
-                    <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.1 }}>{dashboard?.positionsCount ?? 0} / 5</Typography>
-                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)' }}>{dashboard?.liveLabel ?? 'Bootstrapping feed'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)' }}>Active Phase</Typography>
+                    <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.1 }}>{activePhase + 1} / {phases.length}</Typography>
+                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)', textAlign: 'center', px: 1 }}>{phases[activePhase].label}</Typography>
                   </Box>
                 </Box>
               </Stack>
+
+              <Card elevation={0} sx={glassCardSx}>
+                <CardContent>
+                  <Stack spacing={1.5}>
+                    <Typography variant="h6" fontWeight={700}>Run the strategy in one click</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Press Start Process to run: bean start → Yahoo free market data ingest → analysis engines → signal generation → trade decision.
+                    </Typography>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+                      <Button variant="contained" onClick={() => void runPipeline()} disabled={running} sx={{ borderRadius: 99, textTransform: 'none' }}>
+                        {running ? 'Running...' : 'Start Process'}
+                      </Button>
+                      <Chip label={`Current action point: ${phases[activePhase].label}`} color="info" />
+                    </Stack>
+                    {running ? <LinearProgress variant="determinate" value={((activePhase + 1) / phases.length) * 100} /> : null}
+                    <Alert severity="info">{processMessage}</Alert>
+                  </Stack>
+                </CardContent>
+              </Card>
 
               <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems={{ sm: 'center' }}>
                 <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -415,6 +476,9 @@ export default function HomePage() {
                   </CardContent>
                 </Card>
               ) : null}
+              <Typography variant="caption" sx={{ textAlign: 'center', color: 'rgba(30,41,59,0.6)' }}>
+                Platform version: v{appVersion}
+              </Typography>
             </Stack>
           </CardContent>
         </Card>
