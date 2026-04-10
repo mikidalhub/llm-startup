@@ -20,7 +20,8 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
-      NEXT_PUBLIC_API_ORIGIN: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_VAR: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_SECRET: ${{ secrets.NEXT_PUBLIC_API_ORIGIN }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -36,6 +37,23 @@ jobs:
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
+
+      - name: Validate backend URL config
+        run: |
+          set -euo pipefail
+          NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_VAR:-}"
+          if [ -z "$NEXT_PUBLIC_API_ORIGIN" ]; then
+            NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_SECRET:-}"
+          fi
+          if [ -z "${NEXT_PUBLIC_API_ORIGIN:-}" ]; then
+            echo "Missing backend URL."
+            echo "Set either:"
+            echo "  - repository variable NEXT_PUBLIC_API_ORIGIN"
+            echo "  - or repository secret NEXT_PUBLIC_API_ORIGIN"
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_API_ORIGIN is configured: ${NEXT_PUBLIC_API_ORIGIN}"
+          echo "NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN}" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm ci

@@ -20,6 +20,8 @@ jobs:
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
       RAILWAY_DEPLOY_HOOK_URL: ${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}
       FLY_DEPLOY_HOOK_URL: ${{ secrets.FLY_DEPLOY_HOOK_URL }}
+      NEXT_PUBLIC_API_ORIGIN_VAR: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_SECRET: ${{ secrets.NEXT_PUBLIC_API_ORIGIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -55,4 +57,35 @@ jobs:
           fi
           if [ -n "${FLY_DEPLOY_HOOK_URL:-}" ]; then
             curl -fsSL -X POST "${FLY_DEPLOY_HOOK_URL}"
+          fi
+
+      - name: Verify backend health endpoint
+        run: |
+          set -euo pipefail
+          BACKEND_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_VAR:-}"
+          if [ -z "$BACKEND_ORIGIN" ]; then
+            BACKEND_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_SECRET:-}"
+          fi
+          if [ -z "${BACKEND_ORIGIN:-}" ]; then
+            echo "Cannot verify backend health: NEXT_PUBLIC_API_ORIGIN is not configured."
+            echo "Set repository variable or secret NEXT_PUBLIC_API_ORIGIN to your backend base URL."
+            exit 1
+          fi
+          BACKEND_ORIGIN="${BACKEND_ORIGIN%/}"
+          HEALTH_URL="${BACKEND_ORIGIN}/api/health"
+          echo "Checking ${HEALTH_URL}"
+
+          success=false
+          for attempt in $(seq 1 20); do
+            if curl -fsS "$HEALTH_URL" | grep -q '"status":"ok"'; then
+              success=true
+              break
+            fi
+            echo "Backend not healthy yet (attempt ${attempt}/20). Retrying in 15s..."
+            sleep 15
+          done
+
+          if [ "$success" != "true" ]; then
+            echo "Backend health check failed for ${HEALTH_URL}"
+            exit 1
           fi
