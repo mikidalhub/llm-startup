@@ -1,4 +1,4 @@
-name: Deploy Backend to Cloud Run
+name: Deploy backend (GitHub-only)
 
 on:
   push:
@@ -7,86 +7,50 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+  packages: write
 
 concurrency:
-  group: cloud-run-backend
+  group: deploy-backend-ghcr
   cancel-in-progress: true
 
 jobs:
   deploy-backend:
     runs-on: ubuntu-latest
     env:
-      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      REGION: ${{ vars.GCP_REGION }}
-      REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
-      SERVICE_NAME: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
-      IMAGE_NAME: ${{ vars.GCP_IMAGE_NAME }}
-      FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RAILWAY_DEPLOY_HOOK_URL: ${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}
+      FLY_DEPLOY_HOOK_URL: ${{ secrets.FLY_DEPLOY_HOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Validate Google Cloud auth inputs
-        env:
-          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          GCP_CREDENTIALS_JSON: ${{ secrets.GCP_CREDENTIALS_JSON }}
+      - name: Set backend image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${GITHUB_EVENT_REPOSITORY_NAME}-backend" >> "$GITHUB_ENV"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend image
+        run: docker build -t "$IMAGE_NAME:${{ github.sha }}" -t "$IMAGE_NAME:latest" .
+
+      - name: Push backend image
+        run: |
+          docker push "$IMAGE_NAME:${{ github.sha }}"
+          docker push "$IMAGE_NAME:latest"
+
+      - name: Trigger optional provider deploy hooks
         run: |
           set -euo pipefail
-
-          has_wif=false
-          has_sa=false
-          has_json=false
-
-          [ -n "${GCP_WORKLOAD_IDENTITY_PROVIDER:-}" ] && has_wif=true
-          [ -n "${GCP_SERVICE_ACCOUNT:-}" ] && has_sa=true
-          [ -n "${GCP_CREDENTIALS_JSON:-}" ] && has_json=true
-
-          if [ "$has_wif" = true ] && [ "$has_sa" = true ] && [ "$has_json" = false ]; then
-            echo "Using Workload Identity Federation authentication."
-            exit 0
+          if [ -n "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RENDER_DEPLOY_HOOK_URL}"
           fi
-
-          if [ "$has_wif" = false ] && [ "$has_sa" = false ] && [ "$has_json" = true ]; then
-            echo "Using credentials_json authentication."
-            exit 0
+          if [ -n "${RAILWAY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RAILWAY_DEPLOY_HOOK_URL}"
           fi
-
-          echo "Invalid Google Cloud auth configuration. Configure exactly one mode:"
-          echo "  1) GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT"
-          echo "  2) GCP_CREDENTIALS_JSON"
-          echo "Note: secrets are not available to workflows triggered from forks (including Dependabot)."
-          exit 1
-
-      - name: Authenticate to Google Cloud (WIF)
-        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '' && secrets.GCP_CREDENTIALS_JSON == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Authenticate to Google Cloud (Credentials JSON)
-        if: ${{ secrets.GCP_CREDENTIALS_JSON != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' && secrets.GCP_SERVICE_ACCOUNT == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
-
-      - name: Setup gcloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Validate required deploy variables
-        run: |
-          set -euo pipefail
-          required=(PROJECT_ID REGION REPOSITORY SERVICE_NAME IMAGE_NAME FRONTEND_URL)
-          for key in "${required[@]}"; do
-            if [ -z "${!key:-}" ]; then
-              echo "Missing required Actions variable: $key"
-              exit 1
-            fi
-          done
-
-      - name: Deploy backend via deploy.sh
-        run: |
-          chmod +x ./deploy.sh
-          ./deploy.sh
+          if [ -n "${FLY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${FLY_DEPLOY_HOOK_URL}"
+          fi

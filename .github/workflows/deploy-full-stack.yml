@@ -1,0 +1,110 @@
+name: One-shot deploy FE + BE (GitHub-centric)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: full-stack-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
+      NEXT_PUBLIC_API_ORIGIN_VAR: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_SECRET: ${{ secrets.NEXT_PUBLIC_API_ORIGIN }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RAILWAY_DEPLOY_HOOK_URL: ${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}
+      FLY_DEPLOY_HOOK_URL: ${{ secrets.FLY_DEPLOY_HOOK_URL }}
+    environment:
+      name: github-pages
+      url: ${{ steps.pages_deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate backend URL config
+        run: |
+          set -euo pipefail
+          NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_VAR:-}"
+          if [ -z "$NEXT_PUBLIC_API_ORIGIN" ]; then
+            NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_SECRET:-}"
+          fi
+          if [ -z "${NEXT_PUBLIC_API_ORIGIN:-}" ]; then
+            echo "Missing backend URL."
+            echo "Set either:"
+            echo "  - repository variable NEXT_PUBLIC_API_ORIGIN"
+            echo "  - or repository secret NEXT_PUBLIC_API_ORIGIN"
+            echo "Example values:"
+            echo "  https://my-backend.onrender.com"
+            echo "  https://my-backend.up.railway.app"
+            echo "  https://my-backend.fly.dev"
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_API_ORIGIN is configured: ${NEXT_PUBLIC_API_ORIGIN}"
+          echo "NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN}" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Build frontend static site
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./out
+
+      - name: Deploy frontend to GitHub Pages
+        id: pages_deploy
+        uses: actions/deploy-pages@v5
+
+      - name: Set backend image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${GITHUB_EVENT_REPOSITORY_NAME}-backend" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        run: |
+          docker build -t $IMAGE_NAME:${{ github.sha }} -t $IMAGE_NAME:latest .
+          docker push $IMAGE_NAME:${{ github.sha }}
+          docker push $IMAGE_NAME:latest
+
+      - name: Trigger optional provider webhooks
+        run: |
+          set -euo pipefail
+          if [ -n "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RENDER_DEPLOY_HOOK_URL}"
+          fi
+          if [ -n "${RAILWAY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RAILWAY_DEPLOY_HOOK_URL}"
+          fi
+          if [ -n "${FLY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${FLY_DEPLOY_HOOK_URL}"
+          fi

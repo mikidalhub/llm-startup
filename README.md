@@ -1,133 +1,76 @@
-# AI Driven Stock Market Autonomous
+# Value-Driven Trading Advisor (Free Tier)
 
-This project is like a robot that **pretends to trade stocks**.
-It watches market prices, checks a simple signal called RSI, and decides if it would BUY, SELL, or HOLD.
+A minimalist, Revolut-style trading and learning sandbox designed for zero-cost deployment.
 
-✅ It uses **fake money only**.
+## The architecture (simple view)
+- **Code** → stored on GitHub
+- **Image** → built & stored in GitHub Container Registry (GHCR)
+- **App runs** → on a free platform like **Render**, **Railway**, or **Fly.io**
+- **Frontend** → hosted on GitHub Pages
 
-✅ It is for **learning and experiments**, not real investing.
+## Easiest one-shot deployment from GitHub
+Use `/.github/workflows/deploy-full-stack.yml`.
 
-## What this app does
+On each push to `main`, this workflow does everything:
+1. Installs dependencies
+2. Runs tests
+3. Builds and deploys frontend to GitHub Pages
+4. Builds backend Docker image and pushes to GHCR
+5. Optionally triggers backend deploy webhook for Render/Railway/Fly.io
 
-- Gets market prices from Yahoo Finance (example symbols: `AAPL`, `BTC-USD`)
-- Calculates RSI(14) using 5-minute candles
-- Runs an automated trading loop every 1–5+ minutes (configurable)
-- Simulates trades with virtual capital
-- Saves the latest simulation state to `results.json`
-- Shows a very simple dashboard UI
-- Includes beginner-friendly traffic lights:
-  - Value
-  - Quality
-  - Risk
-  - Income
+## Required configuration (minimum)
+- **One backend URL config (choose one)**
+  - Repository Variable: `NEXT_PUBLIC_API_ORIGIN`
+  - or Repository Secret: `NEXT_PUBLIC_API_ORIGIN`
+- **Optional secrets for backend auto-deploy**
+  - `RENDER_DEPLOY_HOOK_URL`
+  - `RAILWAY_DEPLOY_HOOK_URL`
+  - `FLY_DEPLOY_HOOK_URL`
 
-## What AI does here
+If webhook secrets are missing, workflow still deploys FE + pushes BE image.
+Typical backend URLs:
+- Render: `https://<service>.onrender.com`
+- Railway: `https://<service>.up.railway.app`
+- Fly.io: `https://<app>.fly.dev`
 
-- By default, the app uses a simple built-in decision fallback.
-- You can optionally connect Ollama for LLM decisions.
-- If the LLM fails, the app safely falls back to `HOLD` logic.
+Webhook secret values:
+- `RENDER_DEPLOY_HOOK_URL`: Render deploy hook URL from Service Settings.
+- `RAILWAY_DEPLOY_HOOK_URL`: Railway deployment webhook URL.
+- `FLY_DEPLOY_HOOK_URL`: only if you have a webhook endpoint that triggers `fly deploy`.
 
-## API endpoints
+## Missing items? Quick checklist
+See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.
 
-- `GET /api/results` → latest data from `results.json`
-- `GET /api/portfolio` → portfolio snapshot
-- `GET /api/signals` → latest signal list
-- `GET /api/state` → full in-memory state
+## Core principles
+- **Free-tier first**: frontend on GitHub Pages static hosting.
+- **Safe onboarding**: default is **Demo mode** with static JSON snapshots.
+- **Value-driven workflow**: watchlist entries include valuation range, margin of safety, position size, and risk band.
 
-## How to run
+## Repo structure
+- `src/app` — Next.js UI (Dashboard, Watchlist, KPIs, Learn)
+- `public/data` — static JSON snapshots used by the frontend
+- `scripts` — data refresh scripts for scheduled updates
+- `.github/workflows/deploy-full-stack.yml` — one-shot FE + BE GitHub-centric deploy
+- `.github/workflows/update-demo-data.yml` — daily JSON refresh cron
+- `docs/GITHUB_FREE_TIER_IMPLEMENTATION_PLAN.md` — implementation blueprint
+- `docs/BACKEND_FREE_TIER_DEPLOYMENT.md` — backend runtime constraints and options
 
+## Local quick start
 ```bash
-git clone <your-repo-url>
-cd llm-startup
-npm install
-npm start
+npm ci
+npm run dev
+```
+Open `http://localhost:3000`.
+
+## Refresh demo snapshots locally
+```bash
+npm run data:refresh
 ```
 
-Then open:
+## Backend deployment reality check (free tier)
+GitHub Pages cannot run Node.js servers or containers. It only hosts static files.
 
-`http://localhost:3000`
-
-## Notes
-
-- If `results.json` does not exist yet, APIs return safe default data.
-- This is a simulator for education. Do not use it for real-money trading decisions.
-
-## Deploy to Google Cloud Run
-
-### One-time setup
-
-Set your project ID, then run the deployment script:
-
-```bash
-# Optional if you use the default already configured in deploy.sh
-export PROJECT_ID=ltcc-492815
-# Optional if you use the default FE origin already configured in deploy.sh
-export FRONTEND_URL=https://mikidalhub.github.io/llm-startup
-./deploy.sh
-```
-
-The script performs:
-
-- `gcloud config set project $PROJECT_ID`
-- enabling required services (`run`, `artifactregistry`, `cloudbuild`)
-- Artifact Registry repository creation (if missing)
-- Docker auth configuration for Artifact Registry
-- image build and push
-- Cloud Run deployment
-
-### Defaults used by `deploy.sh`
-
-- `REGION=us-central1`
-- `REPOSITORY=myrepo`
-- `SERVICE_NAME=myapp`
-- `IMAGE_NAME=myapp`
-- `PROJECT_ID=ltcc-492815` (default)
-- `FRONTEND_URL=https://mikidalhub.github.io/llm-startup` (default; used to set backend CORS)
-
-You can override them for CI or different environments:
-
-```bash
-PROJECT_ID=my-project REGION=us-central1 REPOSITORY=myrepo SERVICE_NAME=myapp IMAGE_NAME=myapp FRONTEND_URL=https://my-frontend.vercel.app ./deploy.sh
-```
-
-After deployment, Cloud Run prints a URL similar to:
-
-`https://SERVICE_NAME-xxxxx-REGION.a.run.app`
-
-The server reads `PORT` from environment and defaults to `8080` for Cloud Run.
-The deployment script also sets `CORS_ALLOWED_ORIGIN` on Cloud Run so your deployed GitHub frontend can call backend APIs without browser CORS errors.
-
-## Connect GitHub Pages frontend to Cloud Run backend
-
-When frontend and backend run on different domains (for example, `https://mikidalhub.github.io/llm-startup` for frontend and `https://SERVICE-NAME-xxxxx-uc.a.run.app` for backend), configure the frontend with:
-
-```bash
-NEXT_PUBLIC_API_ORIGIN=https://SERVICE-NAME-xxxxx-uc.a.run.app
-```
-
-Without this variable, the frontend uses same-origin calls (for example `/api/process/start`), which on GitHub Pages resolves to the GitHub Pages domain and not to Cloud Run.
-
-### `NEXT_PUBLIC_BASE_PATH` vs `NEXT_PUBLIC_API_ORIGIN`
-
-- `NEXT_PUBLIC_BASE_PATH` is only for frontend URL path prefixing (for example `/llm-startup` on GitHub Pages).
-- `NEXT_PUBLIC_API_ORIGIN` is for backend host routing (for example `https://SERVICE-NAME-xxxxx-uc.a.run.app`).
-
-If frontend and backend are on different domains, set `NEXT_PUBLIC_API_ORIGIN`.
-
-## CI/CD backend deployment
-
-GitHub Actions now includes `.github/workflows/deploy-backend.yml`, which runs `./deploy.sh` on `push` to `main` and on manual trigger.
-
-Required GitHub Actions configuration:
-
-- **Secrets**
-  - `GCP_WORKLOAD_IDENTITY_PROVIDER`
-  - `GCP_SERVICE_ACCOUNT`
-- **Repository Variables**
-  - `GCP_PROJECT_ID`
-  - `GCP_REGION`
-  - `GCP_ARTIFACT_REPOSITORY`
-  - `GCP_CLOUD_RUN_SERVICE`
-  - `GCP_IMAGE_NAME`
-  - `FRONTEND_URL`
-  - `NEXT_PUBLIC_API_ORIGIN` (for frontend workflow)
+Container-based free-tier path:
+1. Build/push backend image to GHCR from GitHub Actions.
+2. Run that image on free compute (Render, Railway, Fly.io).
+3. Point frontend to backend with `NEXT_PUBLIC_API_ORIGIN`.
