@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
-      NEXT_PUBLIC_API_ORIGIN: ${{ vars.NEXT_PUBLIC_API_ORIGIN != '' && vars.NEXT_PUBLIC_API_ORIGIN || secrets.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_VAR: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN_SECRET: ${{ secrets.NEXT_PUBLIC_API_ORIGIN }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RAILWAY_DEPLOY_HOOK_URL: ${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}
+      FLY_DEPLOY_HOOK_URL: ${{ secrets.FLY_DEPLOY_HOOK_URL }}
     environment:
       name: github-pages
       url: ${{ steps.pages_deploy.outputs.page_url }}
@@ -31,6 +35,10 @@ jobs:
       - name: Validate backend URL config
         run: |
           set -euo pipefail
+          NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_VAR:-}"
+          if [ -z "$NEXT_PUBLIC_API_ORIGIN" ]; then
+            NEXT_PUBLIC_API_ORIGIN="${NEXT_PUBLIC_API_ORIGIN_SECRET:-}"
+          fi
           if [ -z "${NEXT_PUBLIC_API_ORIGIN:-}" ]; then
             echo "Missing backend URL."
             echo "Set either:"
@@ -43,6 +51,7 @@ jobs:
             exit 1
           fi
           echo "NEXT_PUBLIC_API_ORIGIN is configured: ${NEXT_PUBLIC_API_ORIGIN}"
+          echo "NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN}" >> "$GITHUB_ENV"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -87,14 +96,15 @@ jobs:
           docker push $IMAGE_NAME:${{ github.sha }}
           docker push $IMAGE_NAME:latest
 
-      - name: Trigger Render deploy (optional)
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
-        run: curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
-
-      - name: Trigger Railway deploy (optional)
-        if: ${{ secrets.RAILWAY_DEPLOY_HOOK_URL != '' }}
-        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_URL }}"
-
-      - name: Trigger Fly.io deploy webhook (optional)
-        if: ${{ secrets.FLY_DEPLOY_HOOK_URL != '' }}
-        run: curl -fsSL -X POST "${{ secrets.FLY_DEPLOY_HOOK_URL }}"
+      - name: Trigger optional provider webhooks
+        run: |
+          set -euo pipefail
+          if [ -n "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RENDER_DEPLOY_HOOK_URL}"
+          fi
+          if [ -n "${RAILWAY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${RAILWAY_DEPLOY_HOOK_URL}"
+          fi
+          if [ -n "${FLY_DEPLOY_HOOK_URL:-}" ]; then
+            curl -fsSL -X POST "${FLY_DEPLOY_HOOK_URL}"
+          fi
