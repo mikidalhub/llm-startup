@@ -35,3 +35,13 @@ npm run data:refresh
 ## Notes
 - Demo mode is intentionally the default in free-tier setups.
 - You can later add broker/WebSocket integrations behind feature flags without changing the free core path.
+
+## Backend deployment reality check (free tier)
+GitHub Pages cannot run Node.js servers or containers. It only hosts static files.
+
+Container-based free-tier path:
+1. Build/push backend image to GHCR with `.github/workflows/build-backend-container.yml`.
+2. Run that image on a free compute provider.
+3. Point frontend to backend by setting `NEXT_PUBLIC_API_ORIGIN`.
+
+Detailed guide: `docs/BACKEND_FREE_TIER_DEPLOYMENT.md`.

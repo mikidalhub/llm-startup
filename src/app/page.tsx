@@ -68,6 +68,19 @@ const formatUsd = (value: number) =>
     maximumFractionDigits: 0
   }).format(value);
 
+const getBasePath = () => {
+  const explicit = process.env.NEXT_PUBLIC_BASE_PATH;
+  if (explicit) return explicit.startsWith('/') ? explicit : `/${explicit}`;
+  if (typeof window === 'undefined') return '';
+
+  const [firstSegment] = window.location.pathname.split('/').filter(Boolean);
+  if (!firstSegment) return '';
+  if (firstSegment.includes('.')) return '';
+  return `/${firstSegment}`;
+};
+
+const getDataUrl = (path: string) => `${getBasePath()}${path.startsWith('/') ? path : `/${path}`}`;
+
 export default function HomePage() {
   const [mode, setMode] = useState<AppMode>('demo');
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
@@ -79,10 +92,10 @@ export default function HomePage() {
   useEffect(() => {
     const loadData = async () => {
       const [dashboardRes, watchlistRes, kpiRes, learnRes] = await Promise.all([
-        fetch('/data/dashboard.json'),
-        fetch('/data/watchlist.json'),
-        fetch('/data/kpis.json'),
-        fetch('/data/learn.json')
+        fetch(getDataUrl('/data/dashboard.json')),
+        fetch(getDataUrl('/data/watchlist.json')),
+        fetch(getDataUrl('/data/kpis.json')),
+        fetch(getDataUrl('/data/learn.json'))
       ]);
 
       setDashboard((await dashboardRes.json()) as DashboardData);
