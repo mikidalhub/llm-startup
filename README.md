@@ -40,6 +40,7 @@ Webhook secret values:
 
 ## Missing items? Quick checklist
 See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.
+See `docs/BACKEND_ARCHITECTURE.md` for backend internals, request flow, and health-check operations.
 
 ## Core principles
 - **Free-tier first**: frontend on GitHub Pages static hosting.
@@ -74,3 +75,13 @@ Container-based free-tier path:
 1. Build/push backend image to GHCR from GitHub Actions.
 2. Run that image on free compute (Render, Railway, Fly.io).
 3. Point frontend to backend with `NEXT_PUBLIC_API_ORIGIN`.
+
+## Backend health checks
+After deploy, verify container status:
+```bash
+curl -fsS https://<your-backend>/api/health
+```
+Trigger process start manually:
+```bash
+curl -fsS -X POST https://<your-backend>/api/process/start -H "Content-Type: application/json" -d '{"reason":"MANUAL_CHECK"}'
+```

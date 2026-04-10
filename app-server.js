@@ -25,6 +25,21 @@ const createJsonResponse = (res, payload) => {
   res.end(JSON.stringify(payload));
 };
 
+const parseJsonBody = async (req) => {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+  }
+
+  if (!body.trim()) return {};
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    return {};
+  }
+};
+
 const readResultsPayload = async (resultsPath) => {
   const fallback = {
     timestamp: new Date().toISOString(),
@@ -57,6 +72,7 @@ const getSafeAssetPath = (publicPath, requestPath) => {
 export const createServer = ({ engine, publicDir }) => {
   const sseClients = new Set();
   const resultsPath = engine.config?.outputPath ?? './results.json';
+  const startedAt = new Date();
 
   engine.onUpdate((state) => {
     const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
@@ -100,9 +116,33 @@ export const createServer = ({ engine, publicDir }) => {
       return;
     }
 
-    if (pathname === '/api/process/start' && req.method === 'POST') {
-      void engine.tick?.('MANUAL');
-      createJsonResponse(res, { ok: true, startedAt: new Date().toISOString() });
+    if ((pathname === '/api/process/start' || pathname === '/process/start') && (req.method === 'POST' || req.method === 'GET')) {
+      const payload = req.method === 'POST' ? await parseJsonBody(req) : {};
+      const triggerReason = typeof payload.reason === 'string' ? payload.reason : 'MANUAL';
+      void engine.tick?.(triggerReason);
+      createJsonResponse(res, {
+        ok: true,
+        status: 'started',
+        triggerReason,
+        acceptedAt: new Date().toISOString(),
+        message: 'Process trigger accepted.'
+      });
+      return;
+    }
+
+    if (pathname === '/api/health' || pathname === '/health' || pathname === '/healthz') {
+      const state = engine.getState();
+      createJsonResponse(res, {
+        status: 'ok',
+        container: 'running',
+        uptimeSeconds: Math.round(process.uptime()),
+        startedAt: startedAt.toISOString(),
+        now: new Date().toISOString(),
+        checks: {
+          engineStateAvailable: Boolean(state),
+          portfolioAvailable: Boolean(state?.portfolio)
+        }
+      });
       return;
     }
 
