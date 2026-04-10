@@ -8,6 +8,16 @@ A minimalist, Revolut-style trading and learning sandbox designed for zero-cost 
 - **App runs** → on a free platform like **Render**, **Railway**, or **Fly.io**
 - **Frontend** → hosted on GitHub Pages
 
+## Which backend provider is this repo using?
+- This repo is **provider-agnostic by default**.
+- There is **no single hardcoded provider** (not locked to Render, Railway, or Fly.io).
+- Backend deploy hooks are optional and selected by whichever secret(s) you set:
+  - `RENDER_DEPLOY_HOOK_URL`
+  - `RAILWAY_DEPLOY_HOOK_URL`
+  - `FLY_DEPLOY_HOOK_URL`
+
+If none are set, workflows still build/push the backend image to GHCR; provider rollout is manual.
+
 ## Easiest one-shot deployment from GitHub
 Use `/.github/workflows/deploy-full-stack.yml`.
 
@@ -17,6 +27,9 @@ On each push to `main`, this workflow does everything:
 3. Builds and deploys frontend to GitHub Pages
 4. Builds backend Docker image and pushes to GHCR
 5. Optionally triggers backend deploy webhook for Render/Railway/Fly.io
+
+## Deploy workflow policy
+This repo uses a single deployment workflow on push: `deploy-full-stack.yml` (FE + BE in one shot).
 
 ## Required configuration (minimum)
 - **One backend URL config (choose one)**
@@ -28,6 +41,12 @@ On each push to `main`, this workflow does everything:
   - `FLY_DEPLOY_HOOK_URL`
 
 If webhook secrets are missing, workflow still deploys FE + pushes BE image.
+Where to set variable/secret in GitHub:
+- **Settings → Secrets and variables → Actions** (Variables tab or Secrets tab).
+- Value format for `NEXT_PUBLIC_API_ORIGIN`:
+  - Use the backend base URL only (example: `https://trade-app.onrender.com`)
+  - Do **not** append `/api`
+
 Typical backend URLs:
 - Render: `https://<service>.onrender.com`
 - Railway: `https://<service>.up.railway.app`
