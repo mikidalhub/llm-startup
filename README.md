@@ -28,16 +28,8 @@ On each push to `main`, this workflow does everything:
 4. Builds backend Docker image and pushes to GHCR
 5. Optionally triggers backend deploy webhook for Render/Railway/Fly.io
 
-## Why you may see 3 deploy runs for one push
-`main` currently has **three separate workflows** that all trigger on `push`:
-
-- `deploy-pages.yml` → deploys frontend to GitHub Pages only
-- `deploy-backend.yml` → builds/pushes backend image (and optional provider hooks)
-- `deploy-full-stack.yml` → does both frontend + backend in one pipeline
-
-If all three are enabled, one merge commit can launch all three jobs at the same time, which looks like duplicate deploys in Actions.
-
-If you want a single deploy pipeline, keep only `deploy-full-stack.yml` on `push` and change the other two to `workflow_dispatch` (manual only), or remove them.
+## Deploy workflow policy
+This repo uses a single deployment workflow on push: `deploy-full-stack.yml` (FE + BE in one shot).
 
 ## Required configuration (minimum)
 - **One backend URL config (choose one)**
