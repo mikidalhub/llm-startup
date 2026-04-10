@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
-      NEXT_PUBLIC_API_ORIGIN: ${{ vars.NEXT_PUBLIC_API_ORIGIN }}
+      NEXT_PUBLIC_API_ORIGIN: ${{ vars.NEXT_PUBLIC_API_ORIGIN != '' && vars.NEXT_PUBLIC_API_ORIGIN || secrets.NEXT_PUBLIC_API_ORIGIN }}
     environment:
       name: github-pages
       url: ${{ steps.pages_deploy.outputs.page_url }}
@@ -28,15 +28,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Validate required GitHub variables
+      - name: Validate backend URL config
         run: |
           set -euo pipefail
           if [ -z "${NEXT_PUBLIC_API_ORIGIN:-}" ]; then
-            echo "Missing repository variable NEXT_PUBLIC_API_ORIGIN"
-            echo "Set it to your backend public URL (for example https://my-backend.onrender.com)."
+            echo "Missing backend URL."
+            echo "Set either:"
+            echo "  - repository variable NEXT_PUBLIC_API_ORIGIN"
+            echo "  - or repository secret NEXT_PUBLIC_API_ORIGIN"
+            echo "Example values:"
+            echo "  https://my-backend.onrender.com"
+            echo "  https://my-backend.up.railway.app"
+            echo "  https://my-backend.fly.dev"
             exit 1
           fi
-          echo "NEXT_PUBLIC_API_ORIGIN is configured."
+          echo "NEXT_PUBLIC_API_ORIGIN is configured: ${NEXT_PUBLIC_API_ORIGIN}"
 
       - name: Setup Node
         uses: actions/setup-node@v6

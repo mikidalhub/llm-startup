@@ -19,14 +19,19 @@ On each push to `main`, this workflow does everything:
 5. Optionally triggers backend deploy webhook for Render/Railway/Fly.io
 
 ## Required configuration (minimum)
-- **Repository variables**
-  - `NEXT_PUBLIC_API_ORIGIN` (URL of your deployed backend)
+- **One backend URL config (choose one)**
+  - Repository Variable: `NEXT_PUBLIC_API_ORIGIN`
+  - or Repository Secret: `NEXT_PUBLIC_API_ORIGIN`
 - **Optional secrets for backend auto-deploy**
   - `RENDER_DEPLOY_HOOK_URL`
   - `RAILWAY_DEPLOY_HOOK_URL`
   - `FLY_DEPLOY_HOOK_URL`
 
 If webhook secrets are missing, workflow still deploys FE + pushes BE image.
+Typical backend URLs:
+- Render: `https://<service>.onrender.com`
+- Railway: `https://<service>.up.railway.app`
+- Fly.io: `https://<app>.fly.dev`
 
 ## Missing items? Quick checklist
 See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.

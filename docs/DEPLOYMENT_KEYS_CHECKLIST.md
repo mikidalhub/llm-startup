@@ -6,9 +6,12 @@ Use this checklist before first deploy.
 - Repository → Settings → Pages
 - Source: **GitHub Actions**
 
-## 2) Required repository variable
-- `NEXT_PUBLIC_API_ORIGIN` = your backend URL
-  - Example: `https://my-backend.onrender.com`
+## 2) Required backend URL (choose one location)
+- Repository variable: `NEXT_PUBLIC_API_ORIGIN`
+- or Repository secret: `NEXT_PUBLIC_API_ORIGIN`
+  - Render example: `https://my-backend.onrender.com`
+  - Railway example: `https://my-backend.up.railway.app`
+  - Fly.io example: `https://my-backend.fly.dev`
 
 Without this, frontend deploy workflow fails by design.
 
