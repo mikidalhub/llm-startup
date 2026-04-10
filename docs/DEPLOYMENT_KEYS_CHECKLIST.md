@@ -22,6 +22,17 @@ Without this, frontend deploy workflow fails by design.
 
 If omitted, backend image is still published to GHCR, but provider rollout is manual.
 
+What to put in each:
+- `RENDER_DEPLOY_HOOK_URL`
+  - In Render: **Dashboard → Service → Settings → Deploy Hook → Create Hook**
+  - Paste the full hook URL (usually starts with `https://api.render.com/deploy/...`).
+- `RAILWAY_DEPLOY_HOOK_URL`
+  - In Railway: create a deployment webhook for your service/project (Settings/Deployments).
+  - Paste the full Railway webhook URL.
+- `FLY_DEPLOY_HOOK_URL`
+  - If you use a webhook relay in front of Fly deploy commands, paste that URL.
+  - If not using webhook-based Fly deploy, leave this secret unset and deploy Fly manually.
+
 ## 4) Package permissions
 The workflow requires `packages: write` permission to push backend images to GHCR.
 

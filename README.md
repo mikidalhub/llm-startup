@@ -33,6 +33,11 @@ Typical backend URLs:
 - Railway: `https://<service>.up.railway.app`
 - Fly.io: `https://<app>.fly.dev`
 
+Webhook secret values:
+- `RENDER_DEPLOY_HOOK_URL`: Render deploy hook URL from Service Settings.
+- `RAILWAY_DEPLOY_HOOK_URL`: Railway deployment webhook URL.
+- `FLY_DEPLOY_HOOK_URL`: only if you have a webhook endpoint that triggers `fly deploy`.
+
 ## Missing items? Quick checklist
 See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.
 

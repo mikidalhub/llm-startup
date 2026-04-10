@@ -25,6 +25,11 @@ Set any of these repository secrets:
 
 When set, the one-shot workflow calls the webhook after publishing the new GHCR image.
 
+How to get them:
+- **Render:** Service Settings → Deploy Hook → copy generated URL.
+- **Railway:** Project/Service deployment webhook URL from Railway settings.
+- **Fly.io:** use a webhook endpoint only if you already have one that triggers `fly deploy`; otherwise leave unset.
+
 Also set frontend backend URL in GitHub config:
 - Repository variable `NEXT_PUBLIC_API_ORIGIN`, or
 - Repository secret `NEXT_PUBLIC_API_ORIGIN`
