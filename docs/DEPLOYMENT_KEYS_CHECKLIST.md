@@ -30,6 +30,7 @@ Where to set it in GitHub:
 Tip:
 - Use **variable** for non-sensitive public backend URLs.
 - Use **secret** only if you intentionally do not want the value visible in repo settings.
+- Store only the origin (e.g., `https://trade-app.onrender.com`), not `https://.../api`.
 
 ## 3) Optional repository secrets (for one-shot backend rollout)
 - `RENDER_DEPLOY_HOOK_URL`

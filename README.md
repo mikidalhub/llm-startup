@@ -43,6 +43,9 @@ This repo uses a single deployment workflow on push: `deploy-full-stack.yml` (FE
 If webhook secrets are missing, workflow still deploys FE + pushes BE image.
 Where to set variable/secret in GitHub:
 - **Settings → Secrets and variables → Actions** (Variables tab or Secrets tab).
+- Value format for `NEXT_PUBLIC_API_ORIGIN`:
+  - Use the backend base URL only (example: `https://trade-app.onrender.com`)
+  - Do **not** append `/api`
 
 Typical backend URLs:
 - Render: `https://<service>.onrender.com`
