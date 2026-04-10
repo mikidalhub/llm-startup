@@ -28,6 +28,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Validate required GitHub variables
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_API_ORIGIN:-}" ]; then
+            echo "Missing repository variable NEXT_PUBLIC_API_ORIGIN"
+            echo "Set it to your backend public URL (for example https://my-backend.onrender.com)."
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_API_ORIGIN is configured."
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:

@@ -25,6 +25,9 @@ Set any of these repository secrets:
 
 When set, the one-shot workflow calls the webhook after publishing the new GHCR image.
 
+Also set repository variable:
+- `NEXT_PUBLIC_API_ORIGIN` (required by frontend workflow)
+
 ## Existing backend runtime in this repo
 - Entry point: `server.js`
 - API/SSE server: `app-server.js`

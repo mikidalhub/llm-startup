@@ -28,6 +28,9 @@ On each push to `main`, this workflow does everything:
 
 If webhook secrets are missing, workflow still deploys FE + pushes BE image.
 
+## Missing items? Quick checklist
+See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.
+
 ## Core principles
 - **Free-tier first**: frontend on GitHub Pages static hosting.
 - **Safe onboarding**: default is **Demo mode** with static JSON snapshots.
