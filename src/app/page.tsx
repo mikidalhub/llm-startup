@@ -120,7 +120,7 @@ const getBasePath = () => {
 };
 
 const getDataUrl = (path: string) => `${getBasePath()}${path.startsWith('/') ? path : `/${path}`}`;
-const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const getApiUrl = (path: string) => `${getApiBaseUrl()}${path}`;
 
 const orbStyles = [

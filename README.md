@@ -60,6 +60,7 @@ Webhook secret values:
 ## Missing items? Quick checklist
 See `docs/DEPLOYMENT_KEYS_CHECKLIST.md` for exact GitHub variables, optional secrets, and Pages setup.
 See `docs/BACKEND_ARCHITECTURE.md` for backend internals, request flow, and health-check operations.
+See `docs/CODEBASE_OVERVIEW.md` for FE/BE structure and duplication audit notes.
 
 ## Core principles
 - **Free-tier first**: frontend on GitHub Pages static hosting.
