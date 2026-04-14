@@ -73,6 +73,7 @@ export const createServer = ({ engine, publicDir }) => {
   const sseClients = new Set();
   const resultsPath = engine.config?.outputPath ?? './results.json';
   const startedAt = new Date();
+  const serveStaticUi = process.env.SERVE_STATIC_UI !== 'false';
 
   engine.onUpdate((state) => {
     const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
@@ -230,6 +231,15 @@ export const createServer = ({ engine, publicDir }) => {
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
+
+    if (!serveStaticUi && (pathname === '/' || pathname === '/index.html')) {
+      createJsonResponse(res, {
+        service: 'backend-api',
+        status: 'ok',
+        message: 'Backend is running. Use frontend URL for UI and /api/* for API endpoints.'
+      });
       return;
     }
 
