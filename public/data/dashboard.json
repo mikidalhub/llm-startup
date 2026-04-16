@@ -1,9 +1,9 @@
 {
-  "asOfUtc": "2026-04-15T08:04:43.134Z",
+  "asOfUtc": "2026-04-16T08:02:46.871Z",
   "nextTradeEest": "2026-04-15 09:30 EEST",
-  "accountValue": 126815,
-  "cash": 34073,
-  "pnlDayPct": 1.56,
+  "accountValue": 125783,
+  "cash": 33463,
+  "pnlDayPct": 0.9,
   "positionsCount": 8,
   "modeLabel": "Free Tier – Demo Mode",
   "liveLabel": "Real-time Live Data"
