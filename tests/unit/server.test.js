@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { createServer } from '../../app-server.js';
 
 const mockState = {
@@ -84,6 +85,48 @@ test('createServer accepts process start triggers', async () => {
     assert.equal(triggerResponse.status, 200);
     assert.equal(triggerJson.status, 'started');
     assert.equal(tickReason, 'TEST_TRIGGER');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('createServer exposes server-sent events stream', async () => {
+  const server = createServer({
+    engine: {
+      ...buildMockEngine(),
+      onEvent: () => () => {}
+    },
+    publicDir: new URL('../../public/', import.meta.url)
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  try {
+    const payload = await new Promise((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${port}/events`, (res) => {
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.headers['content-type'], 'text/event-stream');
+
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk.toString();
+          if (body.includes('event: state') && body.includes('event: process')) {
+            req.destroy();
+            resolve(body);
+          }
+        });
+      });
+
+      req.on('error', reject);
+      setTimeout(() => {
+        req.destroy();
+        reject(new Error('Timed out waiting for SSE payload'));
+      }, 2000);
+    });
+
+    assert.match(String(payload), /event: state/);
+    assert.match(String(payload), /event: process/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

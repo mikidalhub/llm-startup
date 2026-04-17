@@ -35,6 +35,9 @@ So you are currently seeing two different UIs from two different hosts.
 3. Workflow triggers Render deploy hook (if configured).
 4. Workflow health-check validates `${NEXT_PUBLIC_API_ORIGIN}/api/health`.
 5. Open GitHub Pages FE and confirm live calls hit Render backend.
+6. Confirm SSE stream:
+   - `curl -N https://llm-startup.onrender.com/events`
+   - verify you receive `event: state` and `event: process` frames.
 
 ### Phase 4 — Optional hardening
 - Add custom subdomains:

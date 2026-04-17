@@ -59,6 +59,7 @@ type LearnItem = {
 
 type EngineState = {
   marketData?: { lastUpdate?: string };
+  status?: { running?: boolean; message?: string };
   portfolio?: {
     metrics?: {
       portfolioValue?: number;
@@ -181,6 +182,50 @@ export default function HomePage() {
     };
 
     void loadData().then(hydrateFromBackend);
+  }, []);
+
+  useEffect(() => {
+    const processToPhaseIndex: Record<string, number> = {
+      'tick-started': 0,
+      'symbol-fetched': 1,
+      'analysis-computed': 2,
+      'decision-generated': 3,
+      'trade-executed': 4
+    };
+
+    let stream: EventSource | null = null;
+    try {
+      stream = new EventSource(getApiUrl('/events'));
+      stream.addEventListener('state', (event) => {
+        const payload = JSON.parse(event.data) as EngineState;
+        const isRunning = Boolean(payload.status?.running);
+        setRunning(isRunning);
+        if (payload.status?.message) setProcessMessage(payload.status.message);
+      });
+      stream.addEventListener('process', (event) => {
+        const payload = JSON.parse(event.data) as { type?: string; symbol?: string };
+        if (!payload.type) return;
+        if (payload.type in processToPhaseIndex) {
+          setActivePhase(processToPhaseIndex[payload.type]);
+        }
+        if (payload.type === 'tick-finished') {
+          setRunning(false);
+          setProcessMessage('Backend cycle finished.');
+          return;
+        }
+        const message = payload.symbol ? `${payload.type}: ${payload.symbol}` : payload.type;
+        setProcessMessage(`Backend event: ${message}`);
+      });
+      stream.onerror = () => {
+        setProcessMessage('Realtime stream disconnected. Retrying automatically...');
+      };
+    } catch {
+      setProcessMessage('Realtime stream unavailable. You can still run in demo mode.');
+    }
+
+    return () => {
+      stream?.close();
+    };
   }, []);
 
   const runPipeline = async () => {
