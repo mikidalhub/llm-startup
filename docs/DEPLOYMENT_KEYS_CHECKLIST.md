@@ -15,12 +15,30 @@ Use this checklist before first deploy.
 
 Without this, frontend deploy workflow fails by design.
 
+Where to set it in GitHub:
+- Open your repo on GitHub.
+- Go to **Settings → Secrets and variables → Actions**.
+- For a variable:
+  - Open the **Variables** tab → **New repository variable**
+  - Name: `NEXT_PUBLIC_API_ORIGIN`
+  - Value example: `https://my-backend.onrender.com`
+- For a secret:
+  - Open the **Secrets** tab → **New repository secret**
+  - Name: `NEXT_PUBLIC_API_ORIGIN`
+  - Value example: `https://my-backend.onrender.com`
+
+Tip:
+- Use **variable** for non-sensitive public backend URLs.
+- Use **secret** only if you intentionally do not want the value visible in repo settings.
+- Store only the origin (e.g., `https://trade-app.onrender.com`), not `https://.../api`.
+
 ## 3) Optional repository secrets (for one-shot backend rollout)
 - `RENDER_DEPLOY_HOOK_URL`
 - `RAILWAY_DEPLOY_HOOK_URL`
 - `FLY_DEPLOY_HOOK_URL`
 
 If omitted, backend image is still published to GHCR, but provider rollout is manual.
+This means the repo is provider-agnostic by default (no single provider is preselected).
 
 What to put in each:
 - `RENDER_DEPLOY_HOOK_URL`
