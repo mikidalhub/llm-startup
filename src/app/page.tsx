@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Alert,
@@ -10,17 +10,12 @@ import {
   CardContent,
   Chip,
   Container,
-  Divider,
   Grid,
   LinearProgress,
   Stack,
-  ToggleButton,
-  ToggleButtonGroup,
+  Tooltip,
   Typography
 } from '@mui/material';
-
-type AppMode = 'demo' | 'real';
-type TabKey = 'dashboard' | 'watchlist' | 'kpis' | 'learn';
 
 type DashboardData = {
   asOfUtc: string;
@@ -33,32 +28,16 @@ type DashboardData = {
   liveLabel: string;
 };
 
-type WatchIdea = {
-  ticker: string;
-  region: string;
-  fairValueRange: string;
-  marginOfSafety: string;
-  positionSize: string;
-  riskBand: 'Low' | 'Medium' | 'High';
-};
-
-type KpiData = {
-  asOfUtc: string;
-  cagrTargetPct: string;
-  drawdownLimitPct: string;
-  winRatePct: string;
-  sharpeProxy: string;
-  valueCoveragePct: string;
-};
-
-type LearnItem = {
-  title: string;
-  summary: string;
-  action: string;
+type EngineSnapshot = {
+  symbol: string;
+  price: number;
+  volume: number;
+  rsi: number;
+  ts: string;
 };
 
 type EngineState = {
-  marketData?: { lastUpdate?: string };
+  snapshots?: Record<string, EngineSnapshot>;
   status?: { running?: boolean; message?: string };
   portfolio?: {
     metrics?: {
@@ -70,36 +49,50 @@ type EngineState = {
   };
 };
 
-const tabs: { key: TabKey; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'watchlist', label: 'Watchlist' },
-  { key: 'kpis', label: 'KPIs' },
-  { key: 'learn', label: 'Learn' }
-];
+type ProcessEvent = {
+  type?: string;
+  symbol?: string;
+  price?: number;
+  rsi?: number;
+  action?: string;
+  size_pct?: number;
+  reason?: string;
+  timestamp?: string;
+};
 
-const phases = [
-  { label: 'Bean Start', detail: 'Initialize strategy context and startup checks.' },
-  { label: 'Yahoo Data', detail: 'Fetch free Yahoo Finance market snapshots.' },
-  { label: 'Analyze', detail: 'Run fundamentals, risk, and valuation engines.' },
-  { label: 'Signal', detail: 'Generate buy/hold/sell action points.' },
-  { label: 'Trade', detail: 'Execute or simulate orders with position sizing.' }
+type LogEntry = {
+  id: string;
+  kind: 'request' | 'result' | 'system';
+  title: string;
+  detail: string;
+  timestamp: string;
+};
+
+type DecisionEntry = {
+  id: string;
+  symbol: string;
+  action: string;
+  state: string;
+  reason: string;
+  timestamp: string;
+};
+
+const steps = [
+  { label: 'Fetch Data', helper: '1. Fetching Yahoo market data...' },
+  { label: 'Analyze', helper: '2. Analyzing trend and RSI state...' },
+  { label: 'Decide', helper: '3. Building LLM decision and rationale...' },
+  { label: 'Execute', helper: '4. Simulating or executing trade...' }
 ];
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.4';
 
-const riskColorMap: Record<WatchIdea['riskBand'], 'success' | 'warning' | 'error'> = {
-  Low: 'success',
-  Medium: 'warning',
-  High: 'error'
-};
-
 const glassCardSx = {
   borderRadius: 4,
   border: '1px solid rgba(255,255,255,0.58)',
-  boxShadow: '0 30px 70px rgba(52, 74, 125, 0.18)',
+  boxShadow: '0 22px 50px rgba(52, 74, 125, 0.14)',
   background: 'linear-gradient(145deg, rgba(255,255,255,0.52), rgba(255,255,255,0.24))',
-  backdropFilter: 'blur(28px)',
-  WebkitBackdropFilter: 'blur(28px)'
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)'
 };
 
 const formatUsd = (value: number) =>
@@ -115,8 +108,7 @@ const getBasePath = () => {
   if (typeof window === 'undefined') return '';
 
   const [firstSegment] = window.location.pathname.split('/').filter(Boolean);
-  if (!firstSegment) return '';
-  if (firstSegment.includes('.')) return '';
+  if (!firstSegment || firstSegment.includes('.')) return '';
   return `/${firstSegment}`;
 };
 
@@ -131,51 +123,60 @@ const getWebSocketUrl = () => {
   return `${scheme}://${window.location.host}/ws`;
 };
 
-const orbStyles = [
-  { top: '12%', left: '50%' },
-  { top: '30%', left: '79%' },
-  { top: '64%', left: '76%' },
-  { top: '76%', left: '40%' },
-  { top: '48%', left: '14%' }
-];
+const classifyState = (rsi: number | undefined) => {
+  if (typeof rsi !== 'number') return 'Neutral';
+  if (rsi >= 70) return 'Overbought';
+  if (rsi <= 30) return 'Oversold';
+  if (rsi >= 55) return 'Bullish trend';
+  if (rsi <= 45) return 'Bearish trend';
+  return 'Sideways';
+};
+
+const getDecisionReason = (action: string, marketState: string) => {
+  if (action === 'BUY') return `Buy because state is ${marketState} and setup favors recovery/upside.`;
+  if (action === 'SELL') return `Sell because state is ${marketState} and risk reduction is preferred.`;
+  return `Hold because state is ${marketState} and no strong edge is visible.`;
+};
+
+const polarToCartesian = (radius: number, index: number, total: number) => {
+  const angle = (Math.PI * 2 * index) / total - Math.PI / 2;
+  return {
+    x: 50 + radius * Math.cos(angle),
+    y: 50 + radius * Math.sin(angle)
+  };
+};
 
 export default function HomePage() {
-  const [mode, setMode] = useState<AppMode>('demo');
-  const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [watchlist, setWatchlist] = useState<WatchIdea[]>([]);
-  const [kpis, setKpis] = useState<KpiData | null>(null);
-  const [learnItems, setLearnItems] = useState<LearnItem[]>([]);
-  const [activePhase, setActivePhase] = useState(0);
   const [running, setRunning] = useState(false);
-  const [processMessage, setProcessMessage] = useState('Ready to run the end-to-end trading flow.');
+  const [activeStep, setActiveStep] = useState(0);
+  const [processMessage, setProcessMessage] = useState('Ready. Start to stream requests, results, and decisions.');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [decisions, setDecisions] = useState<DecisionEntry[]>([]);
+  const [snapshots, setSnapshots] = useState<Record<string, EngineSnapshot>>({});
+  const snapshotsRef = useRef<Record<string, EngineSnapshot>>({});
 
   useEffect(() => {
-    const loadData = async () => {
-      const [dashboardRes, watchlistRes, kpiRes, learnRes] = await Promise.all([
-        fetch(getDataUrl('/data/dashboard.json')),
-        fetch(getDataUrl('/data/watchlist.json')),
-        fetch(getDataUrl('/data/kpis.json')),
-        fetch(getDataUrl('/data/learn.json'))
-      ]);
+    snapshotsRef.current = snapshots;
+  }, [snapshots]);
 
+  useEffect(() => {
+    const loadDashboard = async () => {
+      const dashboardRes = await fetch(getDataUrl('/data/dashboard.json'));
       setDashboard((await dashboardRes.json()) as DashboardData);
-      setWatchlist((await watchlistRes.json()) as WatchIdea[]);
-      setKpis((await kpiRes.json()) as KpiData);
-      setLearnItems((await learnRes.json()) as LearnItem[]);
     };
 
     const hydrateFromBackend = async () => {
       try {
         const response = await fetch(getApiUrl('/api/state'));
         if (!response.ok) return;
-
         const state = (await response.json()) as EngineState;
+        if (state.snapshots) setSnapshots(state.snapshots);
         setDashboard((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
-            asOfUtc: state.marketData?.lastUpdate ?? prev.asOfUtc,
+            asOfUtc: Object.values(state.snapshots ?? {})[0]?.ts ?? prev.asOfUtc,
             accountValue: state.portfolio?.metrics?.portfolioValue ?? prev.accountValue,
             cash: state.portfolio?.metrics?.cash ?? prev.cash,
             pnlDayPct: state.portfolio?.metrics?.dayPnlPct ?? prev.pnlDayPct,
@@ -184,40 +185,83 @@ export default function HomePage() {
           };
         });
       } catch {
-        setProcessMessage('Backend unavailable right now. Demo data mode is still active.');
+        setProcessMessage('Backend unavailable. Demo mode remains active.');
       }
     };
 
-    void loadData().then(hydrateFromBackend);
+    void loadDashboard().then(hydrateFromBackend);
   }, []);
 
   useEffect(() => {
-    const processToPhaseIndex: Record<string, number> = {
-      'tick-started': 0,
-      'symbol-fetched': 1,
-      'analysis-computed': 2,
-      'decision-generated': 3,
-      'trade-executed': 4
+    const appendLog = (entry: Omit<LogEntry, 'id'>) => {
+      setLogs((prev) => [{ ...entry, id: `${entry.timestamp}-${Math.random()}` }, ...prev].slice(0, 12));
+    };
+
+    const appendDecision = (entry: Omit<DecisionEntry, 'id'>) => {
+      setDecisions((prev) => [{ ...entry, id: `${entry.timestamp}-${Math.random()}` }, ...prev].slice(0, 8));
     };
 
     const handleStateEvent = (payload: EngineState) => {
-      const isRunning = Boolean(payload.status?.running);
-      setRunning(isRunning);
+      setRunning(Boolean(payload.status?.running));
       if (payload.status?.message) setProcessMessage(payload.status.message);
+      if (payload.snapshots) setSnapshots(payload.snapshots);
     };
 
-    const handleProcessEvent = (payload: { type?: string; symbol?: string }) => {
+    const handleProcessEvent = (payload: ProcessEvent) => {
       if (!payload.type) return;
-      if (payload.type in processToPhaseIndex) {
-        setActivePhase(processToPhaseIndex[payload.type]);
+      const timestamp = payload.timestamp ?? new Date().toISOString();
+
+      if (payload.type === 'tick-started') {
+        setActiveStep(0);
+        appendLog({
+          kind: 'system',
+          title: 'Cycle started',
+          detail: 'Trading cycle started. Next: fetch Yahoo market data.',
+          timestamp
+        });
       }
-      if (payload.type === 'tick-finished') {
-        setRunning(false);
-        setProcessMessage('Backend cycle finished.');
-        return;
+
+      if (payload.type === 'symbol-fetch-started') {
+        setActiveStep(0);
+        appendLog({
+          kind: 'request',
+          title: `Yahoo request • ${payload.symbol ?? 'Unknown'}`,
+          detail: `GET chart request initiated for symbol=${payload.symbol ?? '-'} at ${timestamp}.`,
+          timestamp
+        });
       }
+
+      if (payload.type === 'symbol-fetched' || payload.type === 'symbol-fallback') {
+        setActiveStep(1);
+        const state = classifyState(payload.rsi);
+        appendLog({
+          kind: 'result',
+          title: `Yahoo result • ${payload.symbol ?? 'Unknown'}`,
+          detail: `Price=${payload.price ?? '-'}, RSI=${payload.rsi ?? '-'} (${state}).`,
+          timestamp
+        });
+      }
+
+      if (payload.type === 'decision-made') {
+        setActiveStep(2);
+        const snapshot = payload.symbol ? snapshotsRef.current[payload.symbol] : undefined;
+        const state = classifyState(snapshot?.rsi);
+        const action = String(payload.action ?? 'HOLD').toUpperCase();
+        appendDecision({
+          symbol: payload.symbol ?? 'Unknown',
+          action,
+          state,
+          reason: payload.reason ?? getDecisionReason(action, state),
+          timestamp
+        });
+      }
+
+      if (payload.type === 'trade-processed' || payload.type === 'tick-finished') {
+        setActiveStep(3);
+      }
+
       const message = payload.symbol ? `${payload.type}: ${payload.symbol}` : payload.type;
-      setProcessMessage(`Backend event: ${message}`);
+      setProcessMessage(`Realtime event: ${message}`);
     };
 
     let stream: EventSource | null = null;
@@ -228,24 +272,16 @@ export default function HomePage() {
       if (usingSseFallback) return;
       usingSseFallback = true;
       stream = new EventSource(getApiUrl('/events'));
-      stream.addEventListener('state', (event) => {
-        handleStateEvent(JSON.parse(event.data) as EngineState);
-      });
-      stream.addEventListener('process', (event) => {
-        handleProcessEvent(JSON.parse(event.data) as { type?: string; symbol?: string });
-      });
-      stream.onerror = () => {
-        setProcessMessage('Realtime stream disconnected. Retrying automatically...');
-      };
+      stream.addEventListener('state', (event) => handleStateEvent(JSON.parse(event.data) as EngineState));
+      stream.addEventListener('process', (event) => handleProcessEvent(JSON.parse(event.data) as ProcessEvent));
+      stream.onerror = () => setProcessMessage('Realtime stream disconnected. Retrying...');
     };
 
     try {
       socket = new WebSocket(getWebSocketUrl());
-      socket.onopen = () => {
-        setProcessMessage('Realtime stream connected (WebSocket).');
-      };
+      socket.onopen = () => setProcessMessage('Realtime stream connected (WebSocket).');
       socket.onmessage = (event) => {
-        const payload = JSON.parse(event.data) as { channel?: string; data?: EngineState & { type?: string; symbol?: string } };
+        const payload = JSON.parse(event.data) as { channel?: string; data?: EngineState & ProcessEvent };
         if (payload.channel === 'state' && payload.data) handleStateEvent(payload.data);
         if (payload.channel === 'process' && payload.data) handleProcessEvent(payload.data);
       };
@@ -265,326 +301,230 @@ export default function HomePage() {
 
   const runPipeline = async () => {
     if (running) return;
-
-    setRunning(true);
-    setActivePhase(0);
-    setProcessMessage('Starting process: bean start initialized.');
-
+    setActiveStep(0);
+    setProcessMessage('Manual run requested. Waiting for backend stream events...');
     try {
       await fetch(getApiUrl('/api/process/start'), { method: 'POST' });
     } catch {
-      setProcessMessage('Simulating flow locally because backend trigger is unavailable.');
+      setRunning(true);
+      for (let step = 0; step < steps.length; step += 1) {
+        setActiveStep(step);
+        setProcessMessage(steps[step].helper);
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+      setRunning(false);
     }
-
-    for (let index = 0; index < phases.length; index += 1) {
-      setActivePhase(index);
-      setProcessMessage(`${phases[index].label}: ${phases[index].detail}`);
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((resolve) => setTimeout(resolve, 900));
-    }
-
-    setProcessMessage('Process completed: data fetched, analysis finished, trade decision ready.');
-    setRunning(false);
   };
 
-  const modeChip = useMemo(
-    () =>
-      mode === 'demo'
-        ? { label: 'Simulated / Demo Mode', color: 'warning' as const }
-        : { label: 'Real-time Live Data', color: 'success' as const },
-    [mode]
-  );
+  const progress = useMemo(() => ((activeStep + 1) / steps.length) * 100, [activeStep]);
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  const progressLength = (progress / 100) * circumference;
 
   return (
     <Box
       sx={{
         minHeight: '100vh',
-        position: 'relative',
-        py: { xs: 2, md: 5 },
-        overflow: 'hidden',
-        background: 'radial-gradient(circle at top right, #f8f4ff 5%, #eef6ff 42%, #ebf8f7 100%)',
-        '@keyframes trailPulse': {
-          '0%, 100%': { opacity: 0.35 },
-          '50%': { opacity: 0.85 }
-        }
+        py: { xs: 2, md: 4 },
+        background: 'radial-gradient(circle at top right, #f8f4ff 5%, #eef6ff 42%, #ebf8f7 100%)'
       }}
     >
-      <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 2 }}>
-        <Card elevation={0} sx={{ ...glassCardSx, p: { xs: 1, md: 2 } }}>
-          <CardContent>
-            <Stack spacing={3}>
-              <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography variant="overline" sx={{ letterSpacing: 2, color: 'rgba(30, 41, 59, 0.76)' }}>
-                    Glass Intelligence Control Center
-                  </Typography>
-                  <Typography variant="h4" fontWeight={700} sx={{ color: '#0f172a', mb: 0.5 }}>
-                    Value-Driven Trading Advisor
-                  </Typography>
-                  <Typography sx={{ color: 'rgba(15, 23, 42, 0.7)' }}>
-                    UTC {new Date().toISOString().replace('T', ' ').slice(0, 16)} • Next Trade {dashboard?.nextTradeEest ?? '2026-04-15 09:30 EEST'}
-                  </Typography>
-                  <Typography sx={{ mt: 1, color: 'rgba(15,23,42,0.72)' }}>
-                    This platform connects free market data, autonomous analysis, risk controls, and execution logic.
-                    You can inspect opportunities, understand why a signal is produced, and run the full trading flow on demand.
-                  </Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap' }}>
+      <Container maxWidth="lg">
+        <Stack spacing={2.5}>
+          <Card elevation={0} sx={{ ...glassCardSx, p: { xs: 1, md: 2 } }}>
+            <CardContent>
+              <Stack spacing={2}>
+                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
+                  <Box>
+                    <Typography variant="h4" fontWeight={700}>Transparent Trading Monitor</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Simple view of requests, market states, LLM decisions, and execution flow in real time.
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
                     <Button component={Link} href="/readme" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
-                      Platform README
+                      UI README Panel
                     </Button>
                     <Button component={Link} href="/user-guide" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
                       User Guide
                     </Button>
                   </Stack>
-                </Box>
-
-                <Box
-                  sx={{
-                    width: { xs: 300, md: 360 },
-                    aspectRatio: '1 / 1',
-                    borderRadius: '50%',
-                    position: 'relative',
-                    flexShrink: 0,
-                    border: '1px solid rgba(255,255,255,0.56)',
-                    background: 'radial-gradient(circle at 40% 30%, rgba(255,255,255,0.5), rgba(255,255,255,0.08))',
-                    boxShadow: 'inset 0 0 30px rgba(255,255,255,0.38), 0 20px 40px rgba(93,128,176,0.18)'
-                  }}
-                >
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      inset: '12%',
-                      borderRadius: '50%',
-                      border: '1px dashed rgba(74, 107, 157, 0.35)',
-                      '&::after': {
-                        content: '""',
-                        position: 'absolute',
-                        inset: -12,
-                        borderRadius: '50%',
-                        border: '1px solid rgba(255,255,255,0.42)',
-                        filter: 'blur(1px)',
-                        animation: 'trailPulse 5s ease-in-out infinite'
-                      }
-                    }}
-                  />
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      inset: '4%',
-                      borderRadius: '50%',
-                      border: '6px solid rgba(148, 163, 184, 0.25)',
-                      borderTopColor: '#2563eb',
-                      transform: `rotate(${(activePhase / phases.length) * 360}deg)`,
-                      transition: 'transform 400ms ease'
-                    }}
-                  />
-                  <Box sx={{ position: 'absolute', inset: 0 }}>
-                    {orbStyles.map((orb, index) => (
-                      <Box
-                        key={`${orb.top}-${orb.left}`}
-                        sx={{
-                          position: 'absolute',
-                          top: orb.top,
-                          left: orb.left,
-                          transform: 'translate(-50%, -50%)',
-                          width: { xs: 36, md: 42 },
-                          height: { xs: 36, md: 42 },
-                          borderRadius: '50%',
-                          background: index === activePhase ? 'linear-gradient(145deg, #90cdf4, #2563eb)' : 'linear-gradient(145deg, rgba(255,255,255,0.92), rgba(196,228,255,0.46))',
-                          color: index === activePhase ? '#fff' : 'inherit',
-                          border: '1px solid rgba(255,255,255,0.9)',
-                          display: 'grid',
-                          placeItems: 'center'
-                        }}
-                      >
-                        <Typography variant="caption" fontWeight={700}>{index + 1}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: { xs: 120, md: 132 },
-                      height: { xs: 120, md: 132 },
-                      borderRadius: '50%',
-                      display: 'grid',
-                      placeItems: 'center',
-                      border: '1px solid rgba(255,255,255,0.75)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.2))'
-                    }}
-                  >
-                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)' }}>Active Phase</Typography>
-                    <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.1 }}>{activePhase + 1} / {phases.length}</Typography>
-                    <Typography variant="caption" sx={{ color: 'rgba(30,41,59,0.6)', textAlign: 'center', px: 1 }}>{phases[activePhase].label}</Typography>
-                  </Box>
-                </Box>
-                <Stack spacing={0.75} sx={{ minWidth: { md: 220 }, maxWidth: 260 }}>
-                  {phases.map((phase, index) => (
-                    <Box
-                      key={phase.label}
-                      sx={{
-                        px: 1.2,
-                        py: 0.7,
-                        borderRadius: 2,
-                        border: index === activePhase ? '1px solid rgba(37,99,235,0.35)' : '1px solid rgba(255,255,255,0.5)',
-                        background: index === activePhase ? 'rgba(219,234,254,0.7)' : 'rgba(255,255,255,0.3)'
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ color: 'rgba(15, 23, 42, 0.62)' }}>Step {index + 1}</Typography>
-                      <Typography variant="body2" fontWeight={600}>{phase.label}</Typography>
-                    </Box>
-                  ))}
                 </Stack>
-              </Stack>
 
-              <Card elevation={0} sx={glassCardSx}>
-                <CardContent>
-                  <Stack spacing={1.5}>
-                    <Typography variant="h6" fontWeight={700}>Run the strategy in one click</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Press Start Process to run: bean start → Yahoo free market data ingest → analysis engines → signal generation → trade decision.
-                    </Typography>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
-                      <Button variant="contained" onClick={() => void runPipeline()} disabled={running} sx={{ borderRadius: 99, textTransform: 'none' }}>
-                        {running ? 'Running...' : 'Start Process'}
-                      </Button>
-                      <Chip label={`Current action point: ${phases[activePhase].label}`} color="info" />
-                    </Stack>
-                    {running ? <LinearProgress variant="determinate" value={((activePhase + 1) / phases.length) * 100} /> : null}
-                    <Alert severity="info">{processMessage}</Alert>
-                  </Stack>
-                </CardContent>
-              </Card>
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems={{ sm: 'center' }}>
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  {tabs.map((tab) => (
-                    <Button
-                      key={tab.key}
-                      variant={activeTab === tab.key ? 'contained' : 'text'}
-                      onClick={() => setActiveTab(tab.key)}
-                      sx={{
-                        textTransform: 'none',
-                        borderRadius: 99,
-                        background: activeTab === tab.key ? 'linear-gradient(135deg, #5aa3ff, #9586ff)' : 'rgba(255,255,255,0.3)',
-                        color: activeTab === tab.key ? '#fff' : '#1e293b'
-                      }}
-                    >
-                      {tab.label}
-                    </Button>
-                  ))}
-                </Stack>
-                <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}>
-                  <Chip color={modeChip.color} label={modeChip.label} />
-                  <ToggleButtonGroup
-                    exclusive
-                    size="small"
-                    value={mode}
-                    onChange={(_, nextMode: AppMode | null) => {
-                      if (nextMode) setMode(nextMode);
-                    }}
-                  >
-                    <ToggleButton value="real">Real</ToggleButton>
-                    <ToggleButton value="demo">Demo</ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-              </Stack>
-
-              {activeTab === 'dashboard' && dashboard ? (
                 <Grid container spacing={2}>
                   {[
-                    ['Account Value', formatUsd(dashboard.accountValue)],
-                    ['Cash', formatUsd(dashboard.cash)],
-                    ['Day P&L', `${dashboard.pnlDayPct.toFixed(2)}%`],
-                    ['Open Positions', String(dashboard.positionsCount)]
+                    ['Account Value', dashboard ? formatUsd(dashboard.accountValue) : '--'],
+                    ['Cash', dashboard ? formatUsd(dashboard.cash) : '--'],
+                    ['Open Positions', dashboard ? String(dashboard.positionsCount) : '--'],
+                    ['As Of (UTC)', dashboard?.asOfUtc ?? '--']
                   ].map(([label, value]) => (
-                    <Grid item xs={12} sm={6} md={3} key={label}>
-                      <Card elevation={0} sx={glassCardSx}>
-                        <CardContent>
-                          <Typography color="text.secondary">{label}</Typography>
-                          <Typography variant="h5" fontWeight={700}>{value}</Typography>
-                        </CardContent>
-                      </Card>
+                    <Grid item xs={6} md={3} key={label}>
+                      <Tooltip title={`Summary metric: ${label}`}>
+                        <Box sx={{ p: 1.5, borderRadius: 2, border: '1px solid rgba(255,255,255,0.58)', background: 'rgba(255,255,255,0.35)' }}>
+                          <Typography variant="caption" color="text.secondary">{label}</Typography>
+                          <Typography fontWeight={700}>{value}</Typography>
+                        </Box>
+                      </Tooltip>
                     </Grid>
                   ))}
                 </Grid>
-              ) : null}
 
-              {activeTab === 'watchlist' ? (
-                <Card elevation={0} sx={glassCardSx}>
-                  <CardContent>
-                    <Stack spacing={1.2}>
-                      {watchlist.map((idea) => (
-                        <Box key={idea.ticker} sx={{ p: 1.2, border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, background: 'rgba(255,255,255,0.25)' }}>
-                          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1}>
-                            <Box>
-                              <Typography fontWeight={700}>{idea.ticker} • {idea.region}</Typography>
-                              <Typography variant="body2" sx={{ color: '#475569' }}>
-                                Fair value: {idea.fairValueRange} • Margin of safety: {idea.marginOfSafety}
-                              </Typography>
-                              <Typography variant="body2" sx={{ color: '#475569' }}>
-                                Position size: {idea.positionSize}
-                              </Typography>
-                            </Box>
-                            <Chip label={`${idea.riskBand} risk`} color={riskColorMap[idea.riskBand]} />
-                          </Stack>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ) : null}
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2} alignItems={{ sm: 'center' }}>
+                  <Tooltip title="Start a full trading cycle and stream every step.">
+                    <span>
+                      <Button variant="contained" onClick={() => void runPipeline()} disabled={running} sx={{ borderRadius: 99, textTransform: 'none' }}>
+                        {running ? 'Running…' : 'Start Process'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  <Chip color="info" label={`Current: ${steps[activeStep].label}`} />
+                  <Chip variant="outlined" label={`Next: ${steps[Math.min(activeStep + 1, steps.length - 1)].label}`} />
+                </Stack>
+                <LinearProgress variant="determinate" value={progress} />
+                <Alert severity="info">{processMessage}</Alert>
+              </Stack>
+            </CardContent>
+          </Card>
 
-              {activeTab === 'kpis' && kpis ? (
-                <Card elevation={0} sx={glassCardSx}>
-                  <CardContent>
-                    <Typography variant="h6" fontWeight={700}>KPI Panel ({mode.toUpperCase()})</Typography>
-                    <Typography variant="body2" sx={{ color: '#475569' }}>Timestamp UTC: {kpis.asOfUtc}</Typography>
-                    <Divider sx={{ my: 1.5 }} />
-                    <Grid container spacing={1.5}>
-                      {Object.entries({
-                        'CAGR Target': kpis.cagrTargetPct,
-                        'Drawdown Limit': kpis.drawdownLimitPct,
-                        'Win Rate': kpis.winRatePct,
-                        'Sharpe Proxy': kpis.sharpeProxy,
-                        'Value Coverage': kpis.valueCoveragePct
-                      }).map(([label, value]) => (
-                        <Grid item xs={12} sm={6} md={4} key={label}>
-                          <Box sx={{ border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, p: 1.2, background: 'rgba(255,255,255,0.2)' }}>
-                            <Typography variant="caption" sx={{ color: '#475569' }}>{label}</Typography>
-                            <Typography variant="h6" fontWeight={700}>{value}</Typography>
-                          </Box>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </CardContent>
-                </Card>
-              ) : null}
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={4}>
+              <Card elevation={0} sx={glassCardSx}>
+                <CardContent>
+                  <Tooltip title="This wheel shows each process step and what comes next.">
+                    <Typography variant="h6" fontWeight={700}>Process Wheel (4 steps)</Typography>
+                  </Tooltip>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    Active step is highlighted. The blue arc is a single progress line on the same circle path.
+                  </Typography>
+                  <Box sx={{ maxWidth: 320, mx: 'auto', position: 'relative' }}>
+                    <svg viewBox="0 0 100 100" width="100%" aria-label="Trading process wheel">
+                      <circle cx="50" cy="50" r={radius} fill="none" stroke="rgba(148,163,184,0.35)" strokeWidth="3" />
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r={radius}
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        transform="rotate(-90 50 50)"
+                        strokeDasharray={`${progressLength} ${circumference}`}
+                      />
+                      {steps.map((step, index) => {
+                        const point = polarToCartesian(radius, index, steps.length);
+                        const isActive = index === activeStep;
+                        const isComplete = index < activeStep;
+                        const fill = isActive ? '#16a34a' : isComplete ? '#94a3b8' : '#e2e8f0';
+                        const textColor = isActive ? '#ffffff' : isComplete ? '#334155' : '#64748b';
+                        return (
+                          <g key={step.label}>
+                            <circle cx={point.x} cy={point.y} r="5.8" fill={fill} stroke="rgba(255,255,255,0.9)" strokeWidth="0.8" />
+                            <text x={point.x} y={point.y + 1.2} textAnchor="middle" fontSize="4" fontWeight="700" fill={textColor}>
+                              {index + 1}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+                      <Box sx={{ textAlign: 'center', p: 1.5, borderRadius: 99, background: 'rgba(255,255,255,0.7)' }}>
+                        <Typography variant="caption" color="text.secondary">Active phase</Typography>
+                        <Typography fontWeight={700}>{activeStep + 1} / {steps.length}</Typography>
+                        <Typography variant="caption" color="text.secondary">{steps[activeStep].label}</Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Stack spacing={0.75} sx={{ mt: 1.25 }}>
+                    {steps.map((step, index) => (
+                      <Box key={step.label} sx={{ p: 1, borderRadius: 2, border: index === activeStep ? '1px solid rgba(22,163,74,0.4)' : '1px solid rgba(148,163,184,0.4)', background: index === activeStep ? 'rgba(220,252,231,0.7)' : 'rgba(255,255,255,0.2)' }}>
+                        <Typography variant="caption" color="text.secondary">Step {index + 1}</Typography>
+                        <Typography variant="body2" fontWeight={600}>{step.helper}</Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
 
-              {activeTab === 'learn' ? (
-                <Card elevation={0} sx={glassCardSx}>
-                  <CardContent>
-                    <Stack spacing={1.2}>
-                      {learnItems.map((item) => (
-                        <Box key={item.title} sx={{ border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, p: 1.2, background: 'rgba(255,255,255,0.2)' }}>
-                          <Typography fontWeight={700}>{item.title}</Typography>
-                          <Typography variant="body2" sx={{ color: '#475569' }}>{item.summary}</Typography>
-                          <Typography variant="body2" sx={{ mt: 0.6 }}>{item.action}</Typography>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ) : null}
-              <Typography variant="caption" sx={{ textAlign: 'center', color: 'rgba(30,41,59,0.6)' }}>
+            <Grid item xs={12} md={4}>
+              <Card elevation={0} sx={glassCardSx}>
+                <CardContent>
+                  <Tooltip title="Raw stream of Yahoo requests, responses, and system updates.">
+                    <Typography variant="h6" fontWeight={700}>Realtime Logs</Typography>
+                  </Tooltip>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+                    Request payloads, timestamps, and response snippets appear here without page reloads.
+                  </Typography>
+                  <Stack spacing={1}>
+                    {logs.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">No events yet. Click Start Process.</Typography>
+                    ) : logs.map((log) => (
+                      <Box key={log.id} sx={{ p: 1, borderRadius: 2, border: '1px solid rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.25)' }}>
+                        <Stack direction="row" justifyContent="space-between" spacing={1}>
+                          <Typography variant="caption" fontWeight={700}>{log.title}</Typography>
+                          <Chip
+                            size="small"
+                            label={log.kind}
+                            color={log.kind === 'request' ? 'info' : log.kind === 'result' ? 'success' : 'default'}
+                          />
+                        </Stack>
+                        <Typography variant="body2">{log.detail}</Typography>
+                        <Typography variant="caption" color="text.secondary">{log.timestamp}</Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <Card elevation={0} sx={glassCardSx}>
+                <CardContent>
+                  <Tooltip title="Plain-language LLM decisions with visible market state.">
+                    <Typography variant="h6" fontWeight={700}>Decision Transparency</Typography>
+                  </Tooltip>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+                    Every decision includes action, detected stock state, and an easy-to-read reason.
+                  </Typography>
+                  <Stack spacing={1}>
+                    {decisions.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">No decisions yet.</Typography>
+                    ) : decisions.map((entry) => (
+                      <Box key={entry.id} sx={{ p: 1, borderRadius: 2, border: '1px solid rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.25)' }}>
+                        <Stack direction="row" justifyContent="space-between">
+                          <Typography fontWeight={700}>{entry.action} {entry.symbol}</Typography>
+                          <Chip
+                            size="small"
+                            label={entry.state}
+                            color={entry.state.includes('Bullish') || entry.state === 'Oversold' ? 'success' : entry.state.includes('Bearish') || entry.state === 'Overbought' ? 'warning' : 'default'}
+                          />
+                        </Stack>
+                        <Typography variant="body2">{entry.reason}</Typography>
+                        <Typography variant="caption" color="text.secondary">{entry.timestamp}</Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          <Card elevation={0} sx={glassCardSx}>
+            <CardContent>
+              <Tooltip title="High-level explanation of how this app works.">
+                <Typography variant="h6" fontWeight={700}>How this app works (README-style panel)</Typography>
+              </Tooltip>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                1) Stream Yahoo requests and results. 2) Translate market data into plain-language state labels.
+                3) Produce LLM decision with reason. 4) Execute/simulate and show the next expected step.
+              </Typography>
+              <Typography variant="caption" sx={{ mt: 1.25, display: 'block', color: 'rgba(30,41,59,0.65)' }}>
                 Platform version: v{appVersion}
               </Typography>
-            </Stack>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Stack>
       </Container>
     </Box>
   );
