@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -69,25 +70,56 @@ const getSafeAssetPath = (publicPath, requestPath) => {
   return join(publicPath, normalizedPath);
 };
 
+const toWebSocketFrame = (payload) => {
+  const data = Buffer.from(payload);
+  const length = data.length;
+
+  if (length < 126) {
+    return Buffer.concat([Buffer.from([0x81, length]), data]);
+  }
+
+  if (length < 65536) {
+    const header = Buffer.from([0x81, 126, (length >> 8) & 255, length & 255]);
+    return Buffer.concat([header, data]);
+  }
+
+  const header = Buffer.alloc(10);
+  header[0] = 0x81;
+  header[1] = 127;
+  header.writeBigUInt64BE(BigInt(length), 2);
+  return Buffer.concat([header, data]);
+};
+
 export const createServer = ({ engine, publicDir }) => {
   const sseClients = new Set();
+  const wsClients = new Set();
   const resultsPath = engine.config?.outputPath ?? './results.json';
   const startedAt = new Date();
+  const serveStaticUi = process.env.SERVE_STATIC_UI !== 'false';
+
+  const sendWsEvent = (channel, data) => {
+    const frame = toWebSocketFrame(JSON.stringify({ channel, data }));
+    for (const socket of wsClients) {
+      if (!socket.destroyed) socket.write(frame);
+    }
+  };
 
   engine.onUpdate((state) => {
     const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
     for (const client of sseClients) {
       client.write(payload);
     }
+    sendWsEvent('state', state);
   });
   engine.onEvent?.((event) => {
     const payload = `event: process\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of sseClients) {
       client.write(payload);
     }
+    sendWsEvent('process', event);
   });
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') {
       applyCorsHeaders(res);
       res.writeHead(204);
@@ -233,6 +265,15 @@ export const createServer = ({ engine, publicDir }) => {
       return;
     }
 
+    if (!serveStaticUi && (pathname === '/' || pathname === '/index.html')) {
+      createJsonResponse(res, {
+        service: 'backend-api',
+        status: 'ok',
+        message: 'Backend is running. Use frontend URL for UI and /api/* for API endpoints.'
+      });
+      return;
+    }
+
     const requestPath = pathname === '/' ? 'index.html' : pathname.slice(1);
     const filePath = getSafeAssetPath(publicDir.pathname, requestPath);
     const ext = extname(filePath);
@@ -246,4 +287,41 @@ export const createServer = ({ engine, publicDir }) => {
       res.end('Not found');
     }
   });
+
+  server.on('upgrade', (req, socket) => {
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    if (url.pathname !== '/ws') {
+      socket.destroy();
+      return;
+    }
+
+    const key = req.headers['sec-websocket-key'];
+    if (!key || Array.isArray(key)) {
+      socket.destroy();
+      return;
+    }
+
+    const accept = createHash('sha1')
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+
+    wsClients.add(socket);
+    socket.on('close', () => wsClients.delete(socket));
+    socket.on('end', () => wsClients.delete(socket));
+    socket.on('error', () => wsClients.delete(socket));
+
+    socket.write(toWebSocketFrame(JSON.stringify({ channel: 'state', data: engine.getState() })));
+    socket.write(toWebSocketFrame(JSON.stringify({
+      channel: 'process',
+      data: { type: 'heartbeat', timestamp: new Date().toISOString(), message: 'WebSocket connected' }
+    })));
+  });
+
+  return server;
 };

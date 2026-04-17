@@ -110,3 +110,25 @@ jobs:
           if [ -n "${FLY_DEPLOY_HOOK_URL:-}" ]; then
             curl -fsSL -X POST "${FLY_DEPLOY_HOOK_URL}"
           fi
+
+      - name: Verify backend health endpoint
+        run: |
+          set -euo pipefail
+          BACKEND_ORIGIN="${NEXT_PUBLIC_API_ORIGIN%/}"
+          HEALTH_URL="${BACKEND_ORIGIN}/api/health"
+          echo "Checking ${HEALTH_URL}"
+
+          success=false
+          for attempt in $(seq 1 20); do
+            if curl -fsS "$HEALTH_URL" | grep -q '"status":"ok"'; then
+              success=true
+              break
+            fi
+            echo "Backend not healthy yet (attempt ${attempt}/20). Retrying in 15s..."
+            sleep 15
+          done
+
+          if [ "$success" != "true" ]; then
+            echo "Backend health check failed for ${HEALTH_URL}"
+            exit 1
+          fi

@@ -59,6 +59,7 @@ type LearnItem = {
 
 type EngineState = {
   marketData?: { lastUpdate?: string };
+  status?: { running?: boolean; message?: string };
   portfolio?: {
     metrics?: {
       portfolioValue?: number;
@@ -120,8 +121,15 @@ const getBasePath = () => {
 };
 
 const getDataUrl = (path: string) => `${getBasePath()}${path.startsWith('/') ? path : `/${path}`}`;
-const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const getApiBaseUrl = () => process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const getApiUrl = (path: string) => `${getApiBaseUrl()}${path}`;
+const getWebSocketUrl = () => {
+  const apiBase = getApiBaseUrl();
+  if (apiBase) return `${apiBase.replace(/^http/i, 'ws')}/ws`;
+  if (typeof window === 'undefined') return '';
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${window.location.host}/ws`;
+};
 
 const orbStyles = [
   { top: '12%', left: '50%' },
@@ -181,6 +189,78 @@ export default function HomePage() {
     };
 
     void loadData().then(hydrateFromBackend);
+  }, []);
+
+  useEffect(() => {
+    const processToPhaseIndex: Record<string, number> = {
+      'tick-started': 0,
+      'symbol-fetched': 1,
+      'analysis-computed': 2,
+      'decision-generated': 3,
+      'trade-executed': 4
+    };
+
+    const handleStateEvent = (payload: EngineState) => {
+      const isRunning = Boolean(payload.status?.running);
+      setRunning(isRunning);
+      if (payload.status?.message) setProcessMessage(payload.status.message);
+    };
+
+    const handleProcessEvent = (payload: { type?: string; symbol?: string }) => {
+      if (!payload.type) return;
+      if (payload.type in processToPhaseIndex) {
+        setActivePhase(processToPhaseIndex[payload.type]);
+      }
+      if (payload.type === 'tick-finished') {
+        setRunning(false);
+        setProcessMessage('Backend cycle finished.');
+        return;
+      }
+      const message = payload.symbol ? `${payload.type}: ${payload.symbol}` : payload.type;
+      setProcessMessage(`Backend event: ${message}`);
+    };
+
+    let stream: EventSource | null = null;
+    let socket: WebSocket | null = null;
+    let usingSseFallback = false;
+
+    const connectSseFallback = () => {
+      if (usingSseFallback) return;
+      usingSseFallback = true;
+      stream = new EventSource(getApiUrl('/events'));
+      stream.addEventListener('state', (event) => {
+        handleStateEvent(JSON.parse(event.data) as EngineState);
+      });
+      stream.addEventListener('process', (event) => {
+        handleProcessEvent(JSON.parse(event.data) as { type?: string; symbol?: string });
+      });
+      stream.onerror = () => {
+        setProcessMessage('Realtime stream disconnected. Retrying automatically...');
+      };
+    };
+
+    try {
+      socket = new WebSocket(getWebSocketUrl());
+      socket.onopen = () => {
+        setProcessMessage('Realtime stream connected (WebSocket).');
+      };
+      socket.onmessage = (event) => {
+        const payload = JSON.parse(event.data) as { channel?: string; data?: EngineState & { type?: string; symbol?: string } };
+        if (payload.channel === 'state' && payload.data) handleStateEvent(payload.data);
+        if (payload.channel === 'process' && payload.data) handleProcessEvent(payload.data);
+      };
+      socket.onerror = () => connectSseFallback();
+      socket.onclose = () => {
+        if (!usingSseFallback) connectSseFallback();
+      };
+    } catch {
+      connectSseFallback();
+    }
+
+    return () => {
+      socket?.close();
+      stream?.close();
+    };
   }, []);
 
   const runPipeline = async () => {
