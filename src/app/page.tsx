@@ -10,8 +10,11 @@ import {
   CardContent,
   Chip,
   Container,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Fade,
   Grid,
-  LinearProgress,
   Stack,
   Tooltip,
   Typography
@@ -38,7 +41,7 @@ type EngineSnapshot = {
 
 type EngineState = {
   snapshots?: Record<string, EngineSnapshot>;
-  status?: { running?: boolean; message?: string };
+  status?: { running?: boolean; message?: string; stage?: string };
   portfolio?: {
     metrics?: {
       portfolioValue?: number;
@@ -51,6 +54,7 @@ type EngineState = {
 
 type ProcessEvent = {
   type?: string;
+  source?: string;
   symbol?: string;
   price?: number;
   rsi?: number;
@@ -58,41 +62,47 @@ type ProcessEvent = {
   size_pct?: number;
   reason?: string;
   timestamp?: string;
+  errors?: string | null;
 };
 
-type LogEntry = {
+type DetailItem = {
   id: string;
-  kind: 'request' | 'result' | 'system';
   title: string;
-  detail: string;
+  category: 'request' | 'result' | 'decision' | 'system';
   timestamp: string;
+  symbol: string;
+  stockName: string;
+  summary: string;
+  details: string;
+  outcome?: string;
 };
 
-type DecisionEntry = {
-  id: string;
-  symbol: string;
-  action: string;
-  state: string;
-  reason: string;
-  timestamp: string;
-};
+type UiState = 'idle' | 'started' | 'active' | 'completed';
 
 const steps = [
-  { label: 'Fetch Data', helper: '1. Fetching Yahoo market data...' },
-  { label: 'Analyze', helper: '2. Analyzing trend and RSI state...' },
-  { label: 'Decide', helper: '3. Building LLM decision and rationale...' },
-  { label: 'Execute', helper: '4. Simulating or executing trade...' }
+  { label: 'Fetching', helper: '1. Fetching Yahoo market data...' },
+  { label: 'Analyzing', helper: '2. Analyzing trend and RSI state...' },
+  { label: 'Deciding', helper: '3. Planning LLM decision...' },
+  { label: 'Executing', helper: '4. Executing simulated trade...' }
 ];
+
+const stockNames: Record<string, string> = {
+  AAPL: 'Apple Inc.',
+  MSFT: 'Microsoft Corporation',
+  NVDA: 'NVIDIA Corporation',
+  AMZN: 'Amazon.com, Inc.',
+  GOOGL: 'Alphabet Inc.',
+  TSLA: 'Tesla, Inc.',
+  META: 'Meta Platforms, Inc.'
+};
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.4';
 
-const glassCardSx = {
-  borderRadius: 4,
-  border: '1px solid rgba(255,255,255,0.58)',
-  boxShadow: '0 22px 50px rgba(52, 74, 125, 0.14)',
-  background: 'linear-gradient(145deg, rgba(255,255,255,0.52), rgba(255,255,255,0.24))',
-  backdropFilter: 'blur(24px)',
-  WebkitBackdropFilter: 'blur(24px)'
+const roundedCardSx = {
+  borderRadius: '12px',
+  border: '1px solid rgba(148,163,184,0.25)',
+  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+  background: '#ffffff'
 };
 
 const formatUsd = (value: number) =>
@@ -146,19 +156,44 @@ const polarToCartesian = (radius: number, index: number, total: number) => {
   };
 };
 
+const toStockDisplay = (symbol?: string) => {
+  if (!symbol) return { symbol: 'Unknown', full: 'Unknown Company' };
+  return { symbol, full: stockNames[symbol] ?? `${symbol} Corporation` };
+};
+
+const getSignalLabel = (rsi?: number, action?: string) => {
+  const normalizedAction = String(action ?? '').toUpperCase();
+  if (normalizedAction === 'BUY') return 'Bought';
+  if (normalizedAction === 'SELL') return 'Sold';
+  if (typeof rsi === 'number' && rsi <= 35) return 'Potential Buy Zone';
+  if (typeof rsi === 'number' && rsi >= 70) return 'Potential Sell Zone';
+  return 'Hold / Watch';
+};
+
 export default function HomePage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [running, setRunning] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
-  const [processMessage, setProcessMessage] = useState('Ready. Start to stream requests, results, and decisions.');
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [decisions, setDecisions] = useState<DecisionEntry[]>([]);
+  const [uiState, setUiState] = useState<UiState>('idle');
+  const [processMessage, setProcessMessage] = useState('Reset - Ready to Start');
+  const [executionCount, setExecutionCount] = useState(0);
+  const [details, setDetails] = useState<DetailItem[]>([]);
+  const [selectedDetail, setSelectedDetail] = useState<DetailItem | null>(null);
+  const [lastSymbol, setLastSymbol] = useState<string>('AAPL');
   const [snapshots, setSnapshots] = useState<Record<string, EngineSnapshot>>({});
   const snapshotsRef = useRef<Record<string, EngineSnapshot>>({});
+  const uiStateRef = useRef<UiState>('idle');
+  const detailPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     snapshotsRef.current = snapshots;
-  }, [snapshots]);
+    uiStateRef.current = uiState;
+  }, [snapshots, uiState]);
+
+  useEffect(() => {
+    if (!detailPaneRef.current) return;
+    detailPaneRef.current.scrollTop = detailPaneRef.current.scrollHeight;
+  }, [details]);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -193,80 +228,160 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const appendLog = (entry: Omit<LogEntry, 'id'>) => {
-      setLogs((prev) => [{ ...entry, id: `${entry.timestamp}-${Math.random()}` }, ...prev].slice(0, 12));
-    };
-
-    const appendDecision = (entry: Omit<DecisionEntry, 'id'>) => {
-      setDecisions((prev) => [{ ...entry, id: `${entry.timestamp}-${Math.random()}` }, ...prev].slice(0, 8));
+    const appendDetail = (entry: Omit<DetailItem, 'id'>) => {
+      setDetails((prev) => [...prev, { ...entry, id: `${entry.timestamp}-${Math.random()}` }].slice(-200));
     };
 
     const handleStateEvent = (payload: EngineState) => {
-      setRunning(Boolean(payload.status?.running));
+      const isRunning = Boolean(payload.status?.running);
+      setRunning(isRunning);
       if (payload.status?.message) setProcessMessage(payload.status.message);
       if (payload.snapshots) setSnapshots(payload.snapshots);
+      if (isRunning && uiStateRef.current === 'idle') setUiState('started');
+      if (isRunning && payload.status?.stage && payload.status.stage !== 'START') setUiState('active');
     };
 
     const handleProcessEvent = (payload: ProcessEvent) => {
       if (!payload.type) return;
       const timestamp = payload.timestamp ?? new Date().toISOString();
+      const stock = toStockDisplay(payload.symbol);
+      if (payload.symbol) setLastSymbol(payload.symbol);
 
       if (payload.type === 'tick-started') {
+        setUiState('started');
         setActiveStep(0);
-        appendLog({
-          kind: 'system',
+        setProcessMessage('Running... preparing fetch cycle');
+        appendDetail({
+          category: 'system',
           title: 'Cycle started',
-          detail: 'Trading cycle started. Next: fetch Yahoo market data.',
-          timestamp
+          symbol: stock.symbol,
+          stockName: stock.full,
+          timestamp,
+          summary: `Cycle started for ${Array.isArray((payload as { symbols?: string[] }).symbols) ? (payload as { symbols?: string[] }).symbols?.join(', ') : stock.symbol}`,
+          details: JSON.stringify(payload, null, 2)
         });
       }
 
       if (payload.type === 'symbol-fetch-started') {
+        setUiState('active');
         setActiveStep(0);
-        appendLog({
-          kind: 'request',
-          title: `Yahoo request • ${payload.symbol ?? 'Unknown'}`,
-          detail: `GET chart request initiated for symbol=${payload.symbol ?? '-'} at ${timestamp}.`,
-          timestamp
+        setProcessMessage(`Fetching ${stock.full} (${stock.symbol})...`);
+        appendDetail({
+          category: 'request',
+          title: `Yahoo API Request • ${stock.symbol}`,
+          symbol: stock.symbol,
+          stockName: stock.full,
+          timestamp,
+          summary: 'GET quote chart request sent',
+          details: JSON.stringify({
+            method: 'GET',
+            url: `https://query1.finance.yahoo.com/v8/finance/chart/${stock.symbol}?range=1d&interval=5m`,
+            payload: { range: '1d', interval: '5m' },
+            event: payload
+          }, null, 2)
         });
       }
 
       if (payload.type === 'symbol-fetched' || payload.type === 'symbol-fallback') {
+        setUiState('active');
         setActiveStep(1);
         const state = classifyState(payload.rsi);
-        appendLog({
-          kind: 'result',
-          title: `Yahoo result • ${payload.symbol ?? 'Unknown'}`,
-          detail: `Price=${payload.price ?? '-'}, RSI=${payload.rsi ?? '-'} (${state}).`,
-          timestamp
+        setProcessMessage(`Analyzing ${stock.symbol}: ${state}`);
+        appendDetail({
+          category: 'result',
+          title: `Yahoo API Result • ${stock.symbol}`,
+          symbol: stock.symbol,
+          stockName: stock.full,
+          timestamp,
+          summary: `Price ${payload.price ?? '-'} | RSI ${payload.rsi ?? '-'} | ${state}`,
+          details: JSON.stringify({
+            symbol: stock.symbol,
+            stockName: stock.full,
+            price: payload.price,
+            rsi: payload.rsi,
+            state,
+            fallbackReason: payload.reason ?? null
+          }, null, 2)
         });
       }
 
       if (payload.type === 'decision-made') {
+        setUiState('active');
         setActiveStep(2);
         const snapshot = payload.symbol ? snapshotsRef.current[payload.symbol] : undefined;
         const state = classifyState(snapshot?.rsi);
         const action = String(payload.action ?? 'HOLD').toUpperCase();
-        appendDecision({
-          symbol: payload.symbol ?? 'Unknown',
-          action,
-          state,
-          reason: payload.reason ?? getDecisionReason(action, state),
-          timestamp
+        setProcessMessage(`Planning ${action} decision for ${stock.symbol}`);
+        appendDetail({
+          category: 'decision',
+          title: `LLM Decision • ${stock.symbol}`,
+          symbol: stock.symbol,
+          stockName: stock.full,
+          timestamp,
+          summary: `${action} • ${state}`,
+          outcome: action,
+          details: JSON.stringify({
+            prompt: `Given price=${snapshot?.price ?? payload.price}, volume=${snapshot?.volume ?? '-'}, RSI=${snapshot?.rsi ?? payload.rsi}, decide BUY/SELL/HOLD with reason.`,
+            output: {
+              action,
+              size_pct: payload.size_pct,
+              reason: payload.reason ?? getDecisionReason(action, state)
+            },
+            marketState: state
+          }, null, 2)
         });
       }
 
-      if (payload.type === 'trade-processed' || payload.type === 'tick-finished') {
+      if (payload.type === 'trade-processed') {
+        setUiState('active');
         setActiveStep(3);
+        setProcessMessage(`Executing ${payload.action ?? 'HOLD'} for ${stock.symbol}`);
+        appendDetail({
+          category: 'system',
+          title: `Trade Execution • ${stock.symbol}`,
+          symbol: stock.symbol,
+          stockName: stock.full,
+          timestamp,
+          summary: `${payload.action ?? 'HOLD'} @ ${payload.price ?? '-'} processed`,
+          outcome: payload.action?.toUpperCase() ?? 'HOLD',
+          details: JSON.stringify(payload, null, 2)
+        });
       }
 
-      const message = payload.symbol ? `${payload.type}: ${payload.symbol}` : payload.type;
-      setProcessMessage(`Realtime event: ${message}`);
+      if (payload.type === 'tick-finished') {
+        setUiState('completed');
+        setExecutionCount((prev) => {
+          const next = prev + 1;
+          setProcessMessage(`Cycle #${next} Done`);
+          appendDetail({
+            category: 'system',
+            title: `Cycle #${next} Done`,
+            symbol: stock.symbol,
+            stockName: stock.full,
+            timestamp,
+            summary: payload.errors ? `Completed with errors: ${payload.errors}` : 'Completed successfully',
+            details: JSON.stringify(payload, null, 2)
+          });
+          return next;
+        });
+      }
     };
 
     let stream: EventSource | null = null;
     let socket: WebSocket | null = null;
     let usingSseFallback = false;
+    const queue: Array<{ channel?: string; data?: EngineState & ProcessEvent }> = [];
+    let throttleTimer: ReturnType<typeof setInterval> | null = null;
+
+    const startThrottle = () => {
+      if (throttleTimer) return;
+      throttleTimer = setInterval(() => {
+        const next = queue.shift();
+        if (!next) return;
+        if (next.channel === 'state' && next.data) handleStateEvent(next.data);
+        if (next.channel === 'process' && next.data) handleProcessEvent(next.data);
+      }, 120);
+    };
 
     const connectSseFallback = () => {
       if (usingSseFallback) return;
@@ -277,13 +392,14 @@ export default function HomePage() {
       stream.onerror = () => setProcessMessage('Realtime stream disconnected. Retrying...');
     };
 
+    startThrottle();
+
     try {
       socket = new WebSocket(getWebSocketUrl());
       socket.onopen = () => setProcessMessage('Realtime stream connected (WebSocket).');
       socket.onmessage = (event) => {
         const payload = JSON.parse(event.data) as { channel?: string; data?: EngineState & ProcessEvent };
-        if (payload.channel === 'state' && payload.data) handleStateEvent(payload.data);
-        if (payload.channel === 'process' && payload.data) handleProcessEvent(payload.data);
+        queue.push(payload);
       };
       socket.onerror = () => connectSseFallback();
       socket.onclose = () => {
@@ -296,63 +412,84 @@ export default function HomePage() {
     return () => {
       socket?.close();
       stream?.close();
+      if (throttleTimer) clearInterval(throttleTimer);
     };
   }, []);
 
   const runPipeline = async () => {
     if (running) return;
-    setActiveStep(0);
-    setProcessMessage('Manual run requested. Waiting for backend stream events...');
+    setUiState('started');
+    setProcessMessage('Running... waiting for backend events');
     try {
       await fetch(getApiUrl('/api/process/start'), { method: 'POST' });
     } catch {
       setRunning(true);
+      setUiState('active');
       for (let step = 0; step < steps.length; step += 1) {
         setActiveStep(step);
         setProcessMessage(steps[step].helper);
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, 750));
+        await new Promise((resolve) => setTimeout(resolve, 550));
       }
+      setUiState('completed');
+      setExecutionCount((prev) => prev + 1);
       setRunning(false);
     }
   };
 
-  const progress = useMemo(() => ((activeStep + 1) / steps.length) * 100, [activeStep]);
+  const resetFlow = () => {
+    setUiState('idle');
+    setActiveStep(0);
+    setProcessMessage('Reset - Ready to Start');
+  };
+
+  const progress = useMemo(() => {
+    if (uiState === 'idle') return 0;
+    if (uiState === 'completed') return 100;
+    return ((activeStep + 1) / steps.length) * 100;
+  }, [activeStep, uiState]);
   const radius = 38;
   const circumference = 2 * Math.PI * radius;
   const progressLength = (progress / 100) * circumference;
 
+  const statusLabel =
+    uiState === 'idle'
+      ? 'Reset - Ready to Start'
+      : uiState === 'started'
+        ? 'Running...'
+        : uiState === 'completed'
+          ? `Cycle #${executionCount} Done`
+          : `${activeStep + 1}. ${steps[activeStep].label}`;
+  const focusStock = toStockDisplay(lastSymbol);
+  const focusSnapshot = snapshots[lastSymbol];
+  const focusSignal = getSignalLabel(focusSnapshot?.rsi);
+
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        py: { xs: 2, md: 4 },
-        background: 'radial-gradient(circle at top right, #f8f4ff 5%, #eef6ff 42%, #ebf8f7 100%)'
-      }}
-    >
-      <Container maxWidth="lg">
-        <Stack spacing={2.5}>
-          <Card elevation={0} sx={{ ...glassCardSx, p: { xs: 1, md: 2 } }}>
+    <Box sx={{ minHeight: '100vh', py: { xs: 2, md: 4 }, background: '#f8fafc' }}>
+      <Container maxWidth="xl">
+        <Stack spacing={2}>
+          <Card elevation={0} sx={{ ...roundedCardSx, p: { xs: 1, md: 2 } }}>
             <CardContent>
               <Stack spacing={2}>
-                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
+                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1}>
                   <Box>
                     <Typography variant="h4" fontWeight={700}>Transparent Trading Monitor</Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Simple view of requests, market states, LLM decisions, and execution flow in real time.
+                      Idle, started, active, completed—fully visible with real-time Yahoo and LLM flow.
                     </Typography>
                   </Box>
-                  <Stack direction="row" spacing={1} flexWrap="wrap">
-                    <Button component={Link} href="/readme" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" justifyContent="flex-end">
+                    <Chip color="primary" label={`Executions: #${executionCount}`} sx={{ fontWeight: 700, borderRadius: '12px' }} />
+                    <Button component={Link} href="/readme" variant="outlined" size="small" sx={{ borderRadius: '12px', textTransform: 'none' }}>
                       UI README Panel
                     </Button>
-                    <Button component={Link} href="/user-guide" variant="outlined" size="small" sx={{ borderRadius: 99, textTransform: 'none' }}>
+                    <Button component={Link} href="/user-guide" variant="outlined" size="small" sx={{ borderRadius: '12px', textTransform: 'none' }}>
                       User Guide
                     </Button>
                   </Stack>
                 </Stack>
 
-                <Grid container spacing={2}>
+                <Grid container spacing={1.25}>
                   {[
                     ['Account Value', dashboard ? formatUsd(dashboard.accountValue) : '--'],
                     ['Cash', dashboard ? formatUsd(dashboard.cash) : '--'],
@@ -360,164 +497,240 @@ export default function HomePage() {
                     ['As Of (UTC)', dashboard?.asOfUtc ?? '--']
                   ].map(([label, value]) => (
                     <Grid item xs={6} md={3} key={label}>
-                      <Tooltip title={`Summary metric: ${label}`}>
-                        <Box sx={{ p: 1.5, borderRadius: 2, border: '1px solid rgba(255,255,255,0.58)', background: 'rgba(255,255,255,0.35)' }}>
-                          <Typography variant="caption" color="text.secondary">{label}</Typography>
-                          <Typography fontWeight={700}>{value}</Typography>
-                        </Box>
-                      </Tooltip>
+                      <Box sx={{ p: 1.5, borderRadius: '12px', border: '1px solid rgba(148,163,184,0.28)', background: '#f8fafc' }}>
+                        <Typography variant="caption" color="text.secondary">{label}</Typography>
+                        <Typography fontWeight={700}>{value}</Typography>
+                      </Box>
                     </Grid>
                   ))}
                 </Grid>
 
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2} alignItems={{ sm: 'center' }}>
-                  <Tooltip title="Start a full trading cycle and stream every step.">
-                    <span>
-                      <Button variant="contained" onClick={() => void runPipeline()} disabled={running} sx={{ borderRadius: 99, textTransform: 'none' }}>
-                        {running ? 'Running…' : 'Start Process'}
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <Chip color="info" label={`Current: ${steps[activeStep].label}`} />
-                  <Chip variant="outlined" label={`Next: ${steps[Math.min(activeStep + 1, steps.length - 1)].label}`} />
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                  <Button
+                    aria-label="Start Trading"
+                    variant="contained"
+                    onClick={() => void runPipeline()}
+                    disabled={running}
+                    sx={{ borderRadius: '12px', textTransform: 'none' }}
+                  >
+                    {running ? 'Running…' : 'Start Trading'}
+                  </Button>
+                  <Button
+                    aria-label="Reset flow"
+                    variant="outlined"
+                    onClick={resetFlow}
+                    sx={{ borderRadius: '12px', textTransform: 'none' }}
+                  >
+                    Reset
+                  </Button>
+                  <Chip label={statusLabel} color={uiState === 'completed' ? 'success' : uiState === 'idle' ? 'default' : 'info'} sx={{ borderRadius: '12px' }} />
                 </Stack>
-                <LinearProgress variant="determinate" value={progress} />
-                <Alert severity="info">{processMessage}</Alert>
+                <Alert severity={uiState === 'completed' ? 'success' : 'info'}>{processMessage}</Alert>
+                <Alert severity="warning" sx={{ borderRadius: '12px' }}>
+                  <strong>What execution means:</strong> an execution is one completed trading action from the engine (BUY, SELL, or HOLD).
+                  <br />
+                  <strong>Bought/Sold</strong> appears when the model executes a trade. <strong>Potential Buy Zone</strong> means RSI is low (≤ 35) and could be a favorable entry setup.
+                </Alert>
               </Stack>
             </CardContent>
           </Card>
 
           <Grid container spacing={2}>
             <Grid item xs={12} md={4}>
-              <Card elevation={0} sx={glassCardSx}>
+              <Card elevation={0} sx={roundedCardSx}>
                 <CardContent>
-                  <Tooltip title="This wheel shows each process step and what comes next.">
-                    <Typography variant="h6" fontWeight={700}>Process Wheel (4 steps)</Typography>
-                  </Tooltip>
+                  <Typography variant="h6" fontWeight={700}>Process Wheel</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                    Active step is highlighted. The blue arc is a single progress line on the same circle path.
+                    Thin wheel with explicit reset, running, active-step, and completed states.
                   </Typography>
+                  <Tooltip
+                    arrow
+                    placement="top-start"
+                    title={
+                      <Box sx={{ p: 0.5 }}>
+                        <Typography variant="caption" fontWeight={700}>
+                          {focusStock.full} ({focusStock.symbol}) Evaluation
+                        </Typography>
+                        <Typography variant="caption" display="block">Price: {focusSnapshot?.price ?? '--'}</Typography>
+                        <Typography variant="caption" display="block">RSI: {focusSnapshot?.rsi ?? '--'} ({classifyState(focusSnapshot?.rsi)})</Typography>
+                        <Typography variant="caption" display="block">Volume: {focusSnapshot?.volume ?? '--'}</Typography>
+                        <Typography variant="caption" display="block">Signal: {focusSignal}</Typography>
+                        <Typography variant="caption" display="block">Last update: {focusSnapshot?.ts ?? '--'}</Typography>
+                      </Box>
+                    }
+                  >
+                    <Box sx={{ mb: 1.25, p: 1.25, borderRadius: '12px', border: '1px solid rgba(148,163,184,0.35)', background: '#f8fafc' }}>
+                      <Typography variant="caption" color="text.secondary">Company evaluation (hover for key metrics)</Typography>
+                      <Typography variant="body2" fontWeight={700}>{focusStock.full} ({focusStock.symbol})</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Market state: {classifyState(focusSnapshot?.rsi)} • Signal: {focusSignal}
+                      </Typography>
+                    </Box>
+                  </Tooltip>
                   <Box sx={{ maxWidth: 320, mx: 'auto', position: 'relative' }}>
                     <svg viewBox="0 0 100 100" width="100%" aria-label="Trading process wheel">
-                      <circle cx="50" cy="50" r={radius} fill="none" stroke="rgba(148,163,184,0.35)" strokeWidth="3" />
+                      <circle cx="50" cy="50" r={radius} fill="none" stroke={uiState === 'idle' ? 'rgba(100,116,139,0.45)' : 'rgba(148,163,184,0.3)'} strokeWidth="2.5" />
                       <circle
                         cx="50"
                         cy="50"
                         r={radius}
                         fill="none"
-                        stroke="#2563eb"
-                        strokeWidth="3"
+                        stroke={uiState === 'completed' ? '#16a34a' : '#2563eb'}
+                        strokeWidth="2.5"
                         strokeLinecap="round"
                         transform="rotate(-90 50 50)"
                         strokeDasharray={`${progressLength} ${circumference}`}
+                        style={{ transition: 'stroke-dasharray 300ms ease, stroke 300ms ease' }}
                       />
                       {steps.map((step, index) => {
                         const point = polarToCartesian(radius, index, steps.length);
-                        const isActive = index === activeStep;
-                        const isComplete = index < activeStep;
-                        const fill = isActive ? '#16a34a' : isComplete ? '#94a3b8' : '#e2e8f0';
-                        const textColor = isActive ? '#ffffff' : isComplete ? '#334155' : '#64748b';
+                        const isActive = uiState !== 'idle' && index === activeStep;
+                        const isComplete = uiState === 'completed' || index < activeStep;
+                        const fill = isActive ? '#2563eb' : isComplete ? '#16a34a' : '#e2e8f0';
+                        const textColor = isActive ? '#ffffff' : isComplete ? '#ffffff' : '#64748b';
                         return (
                           <g key={step.label}>
-                            <circle cx={point.x} cy={point.y} r="5.8" fill={fill} stroke="rgba(255,255,255,0.9)" strokeWidth="0.8" />
+                            <circle
+                              cx={point.x}
+                              cy={point.y}
+                              r="5.5"
+                              fill={fill}
+                              stroke="rgba(255,255,255,0.95)"
+                              strokeWidth="0.8"
+                              style={{ transition: 'fill 250ms ease' }}
+                            />
                             <text x={point.x} y={point.y + 1.2} textAnchor="middle" fontSize="4" fontWeight="700" fill={textColor}>
-                              {index + 1}
+                              {isComplete ? '✓' : index + 1}
                             </text>
                           </g>
                         );
                       })}
                     </svg>
                     <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-                      <Box sx={{ textAlign: 'center', p: 1.5, borderRadius: 99, background: 'rgba(255,255,255,0.7)' }}>
-                        <Typography variant="caption" color="text.secondary">Active phase</Typography>
-                        <Typography fontWeight={700}>{activeStep + 1} / {steps.length}</Typography>
-                        <Typography variant="caption" color="text.secondary">{steps[activeStep].label}</Typography>
-                      </Box>
+                      <Fade in key={processMessage} timeout={280}>
+                        <Box sx={{ textAlign: 'center', p: 1.3, borderRadius: '12px', background: 'rgba(255,255,255,0.94)', maxWidth: 170 }}>
+                          <Typography variant="caption" color="text.secondary">Central Status</Typography>
+                          <Typography fontWeight={700} sx={{ fontSize: 14 }}>{statusLabel}</Typography>
+                          <Typography variant="caption" color="text.secondary">{processMessage}</Typography>
+                        </Box>
+                      </Fade>
                     </Box>
                   </Box>
-                  <Stack spacing={0.75} sx={{ mt: 1.25 }}>
+
+                  <Stack spacing={0.75} sx={{ mt: 1.5 }}>
                     {steps.map((step, index) => (
-                      <Box key={step.label} sx={{ p: 1, borderRadius: 2, border: index === activeStep ? '1px solid rgba(22,163,74,0.4)' : '1px solid rgba(148,163,184,0.4)', background: index === activeStep ? 'rgba(220,252,231,0.7)' : 'rgba(255,255,255,0.2)' }}>
-                        <Typography variant="caption" color="text.secondary">Step {index + 1}</Typography>
-                        <Typography variant="body2" fontWeight={600}>{step.helper}</Typography>
-                      </Box>
+                      <Button
+                        key={step.label}
+                        fullWidth
+                        variant="text"
+                        sx={{
+                          justifyContent: 'flex-start',
+                          border: index === activeStep && uiState !== 'idle' ? '1px solid rgba(37,99,235,0.45)' : '1px solid rgba(148,163,184,0.4)',
+                          borderRadius: '12px',
+                          background: index === activeStep ? 'rgba(219,234,254,0.5)' : 'transparent',
+                          textTransform: 'none'
+                        }}
+                        onClick={() => {
+                          const existing = details.find((item) => item.summary.includes(step.label));
+                          if (existing) setSelectedDetail(existing);
+                        }}
+                        aria-label={`Step ${index + 1} ${step.label}`}
+                      >
+                        <Typography variant="body2" fontWeight={600}>{index + 1}. {step.label}</Typography>
+                      </Button>
                     ))}
                   </Stack>
                 </CardContent>
               </Card>
             </Grid>
 
-            <Grid item xs={12} md={4}>
-              <Card elevation={0} sx={glassCardSx}>
+            <Grid item xs={12} md={8}>
+              <Card elevation={0} sx={roundedCardSx}>
                 <CardContent>
-                  <Tooltip title="Raw stream of Yahoo requests, responses, and system updates.">
-                    <Typography variant="h6" fontWeight={700}>Realtime Logs</Typography>
-                  </Tooltip>
+                  <Typography variant="h6" fontWeight={700}>Realtime Execution Log</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
-                    Request payloads, timestamps, and response snippets appear here without page reloads.
+                    Click any row for full timestamped request/response/decision payload.
                   </Typography>
-                  <Stack spacing={1}>
-                    {logs.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">No events yet. Click Start Process.</Typography>
-                    ) : logs.map((log) => (
-                      <Box key={log.id} sx={{ p: 1, borderRadius: 2, border: '1px solid rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.25)' }}>
-                        <Stack direction="row" justifyContent="space-between" spacing={1}>
-                          <Typography variant="caption" fontWeight={700}>{log.title}</Typography>
-                          <Chip
-                            size="small"
-                            label={log.kind}
-                            color={log.kind === 'request' ? 'info' : log.kind === 'result' ? 'success' : 'default'}
-                          />
-                        </Stack>
-                        <Typography variant="body2">{log.detail}</Typography>
-                        <Typography variant="caption" color="text.secondary">{log.timestamp}</Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} md={4}>
-              <Card elevation={0} sx={glassCardSx}>
-                <CardContent>
-                  <Tooltip title="Plain-language LLM decisions with visible market state.">
-                    <Typography variant="h6" fontWeight={700}>Decision Transparency</Typography>
-                  </Tooltip>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
-                    Every decision includes action, detected stock state, and an easy-to-read reason.
-                  </Typography>
-                  <Stack spacing={1}>
-                    {decisions.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">No decisions yet.</Typography>
-                    ) : decisions.map((entry) => (
-                      <Box key={entry.id} sx={{ p: 1, borderRadius: 2, border: '1px solid rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.25)' }}>
-                        <Stack direction="row" justifyContent="space-between">
-                          <Typography fontWeight={700}>{entry.action} {entry.symbol}</Typography>
-                          <Chip
-                            size="small"
-                            label={entry.state}
-                            color={entry.state.includes('Bullish') || entry.state === 'Oversold' ? 'success' : entry.state.includes('Bearish') || entry.state === 'Overbought' ? 'warning' : 'default'}
-                          />
-                        </Stack>
-                        <Typography variant="body2">{entry.reason}</Typography>
-                        <Typography variant="caption" color="text.secondary">{entry.timestamp}</Typography>
-                      </Box>
-                    ))}
-                  </Stack>
+                  <Box
+                    ref={detailPaneRef}
+                    sx={{
+                      border: '1px solid rgba(148,163,184,0.3)',
+                      borderRadius: '12px',
+                      maxHeight: { xs: 360, md: 600 },
+                      overflow: 'auto',
+                      p: 1,
+                      background: '#f8fafc'
+                    }}
+                  >
+                    <Stack spacing={0.75}>
+                      {details.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>No events yet. Start Trading.</Typography>
+                      ) : details.map((item) => (
+                        <Button
+                          key={item.id}
+                          variant="text"
+                          onClick={() => setSelectedDetail(item)}
+                          sx={{
+                            textTransform: 'none',
+                            p: 1,
+                            borderRadius: '12px',
+                            border: '1px solid rgba(148,163,184,0.3)',
+                            background: '#ffffff',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            width: '100%'
+                          }}
+                          aria-label={`Open log detail ${item.title}`}
+                        >
+                          <Box textAlign="left">
+                            <Typography variant="caption" color="text.secondary">{item.timestamp}</Typography>
+                            <Typography variant="body2" fontWeight={700}>{item.title}</Typography>
+                            <Tooltip
+                              arrow
+                              title={
+                                <Box>
+                                  <Typography variant="caption" fontWeight={700}>{item.stockName} ({item.symbol})</Typography>
+                                  <Typography variant="caption" display="block">Price: {snapshots[item.symbol]?.price ?? '--'}</Typography>
+                                  <Typography variant="caption" display="block">RSI: {snapshots[item.symbol]?.rsi ?? '--'} ({classifyState(snapshots[item.symbol]?.rsi)})</Typography>
+                                  <Typography variant="caption" display="block">Volume: {snapshots[item.symbol]?.volume ?? '--'}</Typography>
+                                  <Typography variant="caption" display="block">Signal: {getSignalLabel(snapshots[item.symbol]?.rsi, item.outcome)}</Typography>
+                                </Box>
+                              }
+                            >
+                              <Typography variant="body2" color="text.secondary">{item.stockName} ({item.symbol})</Typography>
+                            </Tooltip>
+                            <Typography variant="body2">{item.summary}</Typography>
+                          </Box>
+                          <Stack direction="column" spacing={0.5} alignItems="flex-end">
+                            <Chip
+                              size="small"
+                              label={item.category}
+                              color={item.category === 'request' ? 'info' : item.category === 'result' ? 'success' : item.category === 'decision' ? 'warning' : 'default'}
+                              sx={{ borderRadius: '10px', ml: 1 }}
+                            />
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={getSignalLabel(snapshots[item.symbol]?.rsi, item.outcome)}
+                              color={item.outcome === 'BUY' ? 'success' : item.outcome === 'SELL' ? 'error' : 'default'}
+                              sx={{ borderRadius: '10px', ml: 1 }}
+                            />
+                          </Stack>
+                        </Button>
+                      ))}
+                    </Stack>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
           </Grid>
 
-          <Card elevation={0} sx={glassCardSx}>
+          <Card elevation={0} sx={roundedCardSx}>
             <CardContent>
-              <Tooltip title="High-level explanation of how this app works.">
-                <Typography variant="h6" fontWeight={700}>How this app works (README-style panel)</Typography>
-              </Tooltip>
+              <Typography variant="h6" fontWeight={700}>At-a-glance lifecycle</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                1) Stream Yahoo requests and results. 2) Translate market data into plain-language state labels.
-                3) Produce LLM decision with reason. 4) Execute/simulate and show the next expected step.
+                Reset/Idle: thin gray wheel and “Reset - Ready to Start”. Started: blue progress arc and “Running...”. Active: colored step with live central text.
+                Completed: green checks and cycle completion badge.
               </Typography>
               <Typography variant="caption" sx={{ mt: 1.25, display: 'block', color: 'rgba(30,41,59,0.65)' }}>
                 Platform version: v{appVersion}
@@ -526,6 +739,28 @@ export default function HomePage() {
           </Card>
         </Stack>
       </Container>
+
+      <Dialog
+        open={Boolean(selectedDetail)}
+        onClose={() => setSelectedDetail(null)}
+        fullWidth
+        maxWidth="md"
+        aria-labelledby="detail-dialog-title"
+      >
+        <DialogTitle id="detail-dialog-title">{selectedDetail?.title}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1}>
+            <Typography variant="body2"><strong>Timestamp:</strong> {selectedDetail?.timestamp}</Typography>
+            <Typography variant="body2"><strong>Stock:</strong> {selectedDetail?.stockName} ({selectedDetail?.symbol})</Typography>
+            {selectedDetail?.outcome ? <Typography variant="body2"><strong>Outcome:</strong> {selectedDetail.outcome}</Typography> : null}
+            <Box sx={{ border: '1px solid rgba(148,163,184,0.35)', borderRadius: '12px', p: 1.25, background: '#f8fafc', maxHeight: 400, overflow: 'auto' }}>
+              <Typography variant="body2" component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>
+                {selectedDetail?.details}
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
