@@ -16,6 +16,7 @@ import {
   Fade,
   Grid,
   Stack,
+  Tooltip,
   Typography
 } from '@mui/material';
 
@@ -160,6 +161,15 @@ const toStockDisplay = (symbol?: string) => {
   return { symbol, full: stockNames[symbol] ?? `${symbol} Corporation` };
 };
 
+const getSignalLabel = (rsi?: number, action?: string) => {
+  const normalizedAction = String(action ?? '').toUpperCase();
+  if (normalizedAction === 'BUY') return 'Bought';
+  if (normalizedAction === 'SELL') return 'Sold';
+  if (typeof rsi === 'number' && rsi <= 35) return 'Potential Buy Zone';
+  if (typeof rsi === 'number' && rsi >= 70) return 'Potential Sell Zone';
+  return 'Hold / Watch';
+};
+
 export default function HomePage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [running, setRunning] = useState(false);
@@ -169,6 +179,7 @@ export default function HomePage() {
   const [executionCount, setExecutionCount] = useState(0);
   const [details, setDetails] = useState<DetailItem[]>([]);
   const [selectedDetail, setSelectedDetail] = useState<DetailItem | null>(null);
+  const [lastSymbol, setLastSymbol] = useState<string>('AAPL');
   const [snapshots, setSnapshots] = useState<Record<string, EngineSnapshot>>({});
   const snapshotsRef = useRef<Record<string, EngineSnapshot>>({});
   const uiStateRef = useRef<UiState>('idle');
@@ -234,6 +245,7 @@ export default function HomePage() {
       if (!payload.type) return;
       const timestamp = payload.timestamp ?? new Date().toISOString();
       const stock = toStockDisplay(payload.symbol);
+      if (payload.symbol) setLastSymbol(payload.symbol);
 
       if (payload.type === 'tick-started') {
         setUiState('started');
@@ -448,6 +460,9 @@ export default function HomePage() {
         : uiState === 'completed'
           ? `Cycle #${executionCount} Done`
           : `${activeStep + 1}. ${steps[activeStep].label}`;
+  const focusStock = toStockDisplay(lastSymbol);
+  const focusSnapshot = snapshots[lastSymbol];
+  const focusSignal = getSignalLabel(focusSnapshot?.rsi);
 
   return (
     <Box sx={{ minHeight: '100vh', py: { xs: 2, md: 4 }, background: '#f8fafc' }}>
@@ -511,6 +526,11 @@ export default function HomePage() {
                   <Chip label={statusLabel} color={uiState === 'completed' ? 'success' : uiState === 'idle' ? 'default' : 'info'} sx={{ borderRadius: '12px' }} />
                 </Stack>
                 <Alert severity={uiState === 'completed' ? 'success' : 'info'}>{processMessage}</Alert>
+                <Alert severity="warning" sx={{ borderRadius: '12px' }}>
+                  <strong>What execution means:</strong> an execution is one completed trading action from the engine (BUY, SELL, or HOLD).
+                  <br />
+                  <strong>Bought/Sold</strong> appears when the model executes a trade. <strong>Potential Buy Zone</strong> means RSI is low (≤ 35) and could be a favorable entry setup.
+                </Alert>
               </Stack>
             </CardContent>
           </Card>
@@ -523,6 +543,30 @@ export default function HomePage() {
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
                     Thin wheel with explicit reset, running, active-step, and completed states.
                   </Typography>
+                  <Tooltip
+                    arrow
+                    placement="top-start"
+                    title={
+                      <Box sx={{ p: 0.5 }}>
+                        <Typography variant="caption" fontWeight={700}>
+                          {focusStock.full} ({focusStock.symbol}) Evaluation
+                        </Typography>
+                        <Typography variant="caption" display="block">Price: {focusSnapshot?.price ?? '--'}</Typography>
+                        <Typography variant="caption" display="block">RSI: {focusSnapshot?.rsi ?? '--'} ({classifyState(focusSnapshot?.rsi)})</Typography>
+                        <Typography variant="caption" display="block">Volume: {focusSnapshot?.volume ?? '--'}</Typography>
+                        <Typography variant="caption" display="block">Signal: {focusSignal}</Typography>
+                        <Typography variant="caption" display="block">Last update: {focusSnapshot?.ts ?? '--'}</Typography>
+                      </Box>
+                    }
+                  >
+                    <Box sx={{ mb: 1.25, p: 1.25, borderRadius: '12px', border: '1px solid rgba(148,163,184,0.35)', background: '#f8fafc' }}>
+                      <Typography variant="caption" color="text.secondary">Company evaluation (hover for key metrics)</Typography>
+                      <Typography variant="body2" fontWeight={700}>{focusStock.full} ({focusStock.symbol})</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Market state: {classifyState(focusSnapshot?.rsi)} • Signal: {focusSignal}
+                      </Typography>
+                    </Box>
+                  </Tooltip>
                   <Box sx={{ maxWidth: 320, mx: 'auto', position: 'relative' }}>
                     <svg viewBox="0 0 100 100" width="100%" aria-label="Trading process wheel">
                       <circle cx="50" cy="50" r={radius} fill="none" stroke={uiState === 'idle' ? 'rgba(100,116,139,0.45)' : 'rgba(148,163,184,0.3)'} strokeWidth="2.5" />
@@ -641,15 +685,37 @@ export default function HomePage() {
                           <Box textAlign="left">
                             <Typography variant="caption" color="text.secondary">{item.timestamp}</Typography>
                             <Typography variant="body2" fontWeight={700}>{item.title}</Typography>
-                            <Typography variant="body2" color="text.secondary">{item.stockName} ({item.symbol})</Typography>
+                            <Tooltip
+                              arrow
+                              title={
+                                <Box>
+                                  <Typography variant="caption" fontWeight={700}>{item.stockName} ({item.symbol})</Typography>
+                                  <Typography variant="caption" display="block">Price: {snapshots[item.symbol]?.price ?? '--'}</Typography>
+                                  <Typography variant="caption" display="block">RSI: {snapshots[item.symbol]?.rsi ?? '--'} ({classifyState(snapshots[item.symbol]?.rsi)})</Typography>
+                                  <Typography variant="caption" display="block">Volume: {snapshots[item.symbol]?.volume ?? '--'}</Typography>
+                                  <Typography variant="caption" display="block">Signal: {getSignalLabel(snapshots[item.symbol]?.rsi, item.outcome)}</Typography>
+                                </Box>
+                              }
+                            >
+                              <Typography variant="body2" color="text.secondary">{item.stockName} ({item.symbol})</Typography>
+                            </Tooltip>
                             <Typography variant="body2">{item.summary}</Typography>
                           </Box>
-                          <Chip
-                            size="small"
-                            label={item.category}
-                            color={item.category === 'request' ? 'info' : item.category === 'result' ? 'success' : item.category === 'decision' ? 'warning' : 'default'}
-                            sx={{ borderRadius: '10px', ml: 1 }}
-                          />
+                          <Stack direction="column" spacing={0.5} alignItems="flex-end">
+                            <Chip
+                              size="small"
+                              label={item.category}
+                              color={item.category === 'request' ? 'info' : item.category === 'result' ? 'success' : item.category === 'decision' ? 'warning' : 'default'}
+                              sx={{ borderRadius: '10px', ml: 1 }}
+                            />
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={getSignalLabel(snapshots[item.symbol]?.rsi, item.outcome)}
+                              color={item.outcome === 'BUY' ? 'success' : item.outcome === 'SELL' ? 'error' : 'default'}
+                              sx={{ borderRadius: '10px', ml: 1 }}
+                            />
+                          </Stack>
                         </Button>
                       ))}
                     </Stack>

@@ -6,9 +6,11 @@ A minimal, real-time trading monitor focused on **state transparency** and **exe
 - **Lifecycle-first UI** with explicit states: `Reset/Idle`, `Started`, `Active`, `Completed`.
 - **Thin SVG process wheel** with dynamic center text and smooth transition feedback.
 - **Execution badge** (`Executions: #X`) that increments on each full trading cycle.
+- **Execution semantics panel** that clearly explains BUY/SELL/HOLD and “Potential Buy Zone”.
 - **Full-width, scrollable realtime log stream** with clickable entries.
 - **Detail modal** for every event (request/result/decision/system), showing timestamped payloads and outcomes.
 - **Realtime WebSocket + throttled rendering** for responsive updates under burst traffic.
+- **Company evaluation tooltips** with key metrics (price, RSI/state, volume, signal).
 
 ## UI Features
 - **Rounded, flat cards** (12px radius, subtle shadow) for low-noise readability.
