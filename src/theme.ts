@@ -18,7 +18,7 @@ const theme = createTheme({
     fontFamily: ['"Inter"', '"Segoe UI"', 'Roboto', 'Arial', 'sans-serif'].join(',')
   },
   shape: {
-    borderRadius: 16
+    borderRadius: 10
   }
 });
 

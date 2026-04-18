@@ -29,7 +29,7 @@ test('buildFallbackDecision follows RSI bands', () => {
 
 test('TradingEngine tick writes results and records trade with synthetic fallback', async () => {
   const writes = [];
-  const dbCalls = { decisions: 0, trades: 0, snapshots: 0, portfolioSnapshots: 0, riskEvents: 0 };
+  const redisCalls = { decisions: 0, trades: 0, results: 0, state: 0 };
   const engine = new TradingEngine(baseConfig, {
     fetchFn: async () => {
       throw new Error('network down');
@@ -38,13 +38,12 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
       writes.push({ path, payload: JSON.parse(payload) });
     },
     clock: () => '2024-01-01T00:00:00.000Z',
-    database: {
-      recordDecision: () => { dbCalls.decisions += 1; },
-      recordTrade: () => { dbCalls.trades += 1; },
-      recordSnapshot: () => { dbCalls.snapshots += 1; },
-      recordPortfolioSnapshot: () => { dbCalls.portfolioSnapshots += 1; },
-      recordRiskEvent: () => { dbCalls.riskEvents += 1; },
-      loadLatestState: () => null
+    redisStore: {
+      appendDecision: async () => { redisCalls.decisions += 1; },
+      appendTrade: async () => { redisCalls.trades += 1; },
+      cacheResults: async () => { redisCalls.results += 1; },
+      cacheState: async () => { redisCalls.state += 1; },
+      readLatestState: async () => null
     }
   });
 
@@ -55,16 +54,16 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
   assert.equal(writes[0].path, './tmp-results.json');
   assert.equal(writes[0].payload.snapshots.AAPL.source, 'synthetic-fallback');
   assert.equal(engine.portfolio.trades.length, 1);
-  assert.equal(dbCalls.decisions, 1);
-  assert.equal(dbCalls.trades, 1);
-  assert.equal(dbCalls.snapshots, 1);
-  assert.equal(dbCalls.portfolioSnapshots, 1);
+  assert.equal(redisCalls.decisions, 1);
+  assert.equal(redisCalls.trades, 1);
+  assert.equal(redisCalls.results, 1);
+  assert.equal(redisCalls.state, 1);
 });
 
 test('TradingEngine restores durable state on start bootstrap', async () => {
   const engine = new TradingEngine(baseConfig, {
-    database: {
-      loadLatestState: () => ({
+    redisStore: {
+      readLatestState: async () => ({
         portfolio: {
           cash: 600,
           positions: { AAPL: { shares: 2, avgCost: 120 } },
@@ -74,12 +73,7 @@ test('TradingEngine restores durable state on start bootstrap', async () => {
         },
         snapshots: { AAPL: { symbol: 'AAPL', price: 120, volume: 10, rsi: 40, ts: '2024-01-01T00:00:00.000Z' } },
         lastError: null
-      }),
-      recordDecision: () => {},
-      recordTrade: () => {},
-      recordSnapshot: () => {},
-      recordPortfolioSnapshot: () => {},
-      recordRiskEvent: () => {}
+      })
     }
   });
 

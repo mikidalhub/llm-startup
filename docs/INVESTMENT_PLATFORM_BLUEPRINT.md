@@ -23,15 +23,14 @@
 - `scanner/market-scanner.js`: S&P500/Nasdaq/Dividend list scanning and ranking.
 - `explainer/investment-explainer.js`: human reasoning + traffic lights.
 
-## 3) Database Structure (DB-first + JSON compatibility fallback)
-Runtime persistence now uses SQLite (`db.js`) as the source of truth for durability, recovery, and auditability:
-- `decisions(id PK, created_at, symbol, action, size_pct, reason, source)`
-- `trades(id PK, created_at, symbol, action, status, size_pct, shares, price, reason)`
-- `snapshots(id PK, created_at, symbol, price, volume, rsi, source)`
-- `portfolio_snapshots(id PK, created_at, portfolio_value, cash, positions_json, metrics_json, last_error)`
-- `risk_events(id PK, created_at, symbol, level, message, metadata_json)`
+## 3) Persistence Structure (Redis-first + JSON compatibility fallback)
+Runtime persistence now uses Redis (`redis-store.js`) for fast cached durability and recovery:
+- `trading:state` (latest engine state)
+- `trading:results` (latest results payload)
+- `trading:decisions` (rolling list of recent decisions)
+- `trading:trades` (rolling list of recent trades)
 
-`results.json` remains a short-term compatibility layer and is still written after each tick for existing consumers. API reads are DB-first with JSON fallback if SQLite is unavailable.
+`results.json` remains a compatibility layer and is still written after each tick for existing consumers. API reads are Redis-first with JSON fallback when Redis is unavailable.
 
 ## 4) API Endpoints
 - Existing:

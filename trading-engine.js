@@ -87,7 +87,7 @@ export class TradingEngine {
     this.fetchFn = dependencies.fetchFn ?? fetch;
     this.writeFileFn = dependencies.writeFileFn ?? writeFile;
     this.clock = dependencies.clock ?? (() => new Date().toISOString());
-    this.database = dependencies.database ?? null;
+    this.redisStore = dependencies.redisStore ?? null;
 
     this.portfolio = {
       cash: config.capital,
@@ -397,11 +397,28 @@ export class TradingEngine {
     const std = Math.sqrt(variance);
     const sharpe = std > 0 ? (mean / std) * Math.sqrt(returns.length) : 0;
 
+    const completedTrades = this.portfolio.trades.filter((trade) => trade.status === 'FILLED' && trade.action !== 'HOLD');
+    const tradePnl = completedTrades.map((trade) => {
+      const side = trade.action === 'BUY' ? -1 : 1;
+      return side * trade.shares * trade.price;
+    });
+    const wins = tradePnl.filter((value) => value > 0).length;
+    const avgProfitPerTrade = tradePnl.length ? tradePnl.reduce((sum, value) => sum + value, 0) / tradePnl.length : 0;
+    let peak = values[0] || this.config.capital;
+    let maxDrawdown = 0;
+    for (const value of values) {
+      peak = Math.max(peak, value);
+      const drawdown = ((value - peak) / peak) * 100;
+      if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+    }
+
     this.portfolio.metrics = {
       pnl: Number(pnl.toFixed(2)),
       returnPct: Number(returnPct.toFixed(2)),
-      winRate: 0,
+      winRate: completedTrades.length ? Number(((wins / completedTrades.length) * 100).toFixed(2)) : 0,
       sharpe: Number(sharpe.toFixed(2)),
+      maxDrawdown: Number(maxDrawdown.toFixed(2)),
+      avgProfitPerTrade: Number(avgProfitPerTrade.toFixed(2)),
       portfolioValue
     };
   }
@@ -417,18 +434,7 @@ export class TradingEngine {
 
     const timestamp = this.clock();
 
-    if (this.database) {
-      this.database.recordPortfolioSnapshot({
-        ts: timestamp,
-        portfolioValue: this.getPortfolioValue(),
-        cash: this.portfolio.cash,
-        positions: this.portfolio.positions,
-        metrics: this.portfolio.metrics,
-        lastError: this.lastError
-      });
-    }
-
-    await this.writeFileFn(this.config.outputPath, JSON.stringify({
+    const payload = {
       timestamp,
       portfolioValue: this.getPortfolioValue(),
       positions: this.portfolio.positions,
@@ -439,22 +445,27 @@ export class TradingEngine {
       snapshots: this.snapshots,
       portfolio: this.portfolio,
       lastError: this.lastError
-    }, null, 2));
+    };
+
+    await this.writeFileFn(this.config.outputPath, JSON.stringify(payload, null, 2));
+    await this.redisStore?.cacheResults(payload);
+    await this.redisStore?.cacheState(this.getState());
   }
 
 
 
   async bootstrapFromStorage() {
-    if (!this.database) return;
-
-    const restored = this.database.loadLatestState(this.config.capital);
+    const restored = (await this.redisStore?.readLatestState())
+      ?? null;
     if (!restored) return;
+
+    const restoredPortfolio = restored.portfolio ?? {};
     this.portfolio = {
       ...this.portfolio,
-      ...restored.portfolio,
-      trades: restored.portfolio.trades ?? this.portfolio.trades,
-      equityCurve: restored.portfolio.equityCurve?.length ? restored.portfolio.equityCurve : this.portfolio.equityCurve,
-      metrics: restored.portfolio.metrics ?? this.portfolio.metrics
+      ...restoredPortfolio,
+      trades: restoredPortfolio.trades ?? this.portfolio.trades,
+      equityCurve: restoredPortfolio.equityCurve?.length ? restoredPortfolio.equityCurve : this.portfolio.equityCurve,
+      metrics: restoredPortfolio.metrics ?? this.portfolio.metrics
     };
     this.snapshots = restored.snapshots ?? {};
     this.lastError = restored.lastError;
@@ -490,34 +501,22 @@ export class TradingEngine {
         const decision = await this.llmDecide(snapshot);
         const decisionTimestamp = this.clock();
         this.emitEvent('decision-made', { symbol, action: decision.action, size_pct: decision.size_pct });
+        const decisionRecord = {
+          id: `${symbol}-${decisionTimestamp}`,
+          ts: decisionTimestamp,
+          symbol,
+          action: String(decision.action || 'HOLD').toUpperCase(),
+          sizePct: clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct),
+          reason: decision.reason || 'No reason supplied',
+          source
+        };
 
-        if (this.database) {
-          this.database.recordDecision({
-            ts: decisionTimestamp,
-            symbol,
-            action: String(decision.action || 'HOLD').toUpperCase(),
-            sizePct: clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct),
-            reason: decision.reason || 'No reason supplied',
-            source
-          });
-        }
+        await this.redisStore?.appendDecision(decisionRecord);
 
         this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
         const trade = this.executeTrade(symbol, snapshot, decision, decisionTimestamp);
 
-        if (this.database) {
-          this.database.recordTrade(trade);
-          this.database.recordSnapshot(snapshot);
-          if (snapshot.rsi <= 30 || snapshot.rsi >= 70) {
-            this.database.recordRiskEvent({
-              ts: decisionTimestamp,
-              symbol,
-              level: snapshot.rsi <= 30 ? 'ELEVATED_BUY_SIGNAL' : 'ELEVATED_SELL_SIGNAL',
-              message: snapshot.rsi <= 30 ? 'Oversold threshold breached.' : 'Overbought threshold breached.',
-              metadata: { rsi: snapshot.rsi, price: snapshot.price }
-            });
-          }
-        }
+        await this.redisStore?.appendTrade(trade);
 
         this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price });
       }
