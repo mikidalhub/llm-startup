@@ -41,7 +41,7 @@ const parseJsonBody = async (req) => {
   }
 };
 
-const readResultsPayload = async (resultsPath) => {
+const readResultsPayload = async ({ resultsPath, database }) => {
   const fallback = {
     timestamp: new Date().toISOString(),
     portfolioValue: 0,
@@ -49,6 +49,14 @@ const readResultsPayload = async (resultsPath) => {
     trades: [],
     signals: []
   };
+
+  if (database) {
+    try {
+      return database.readResultsPayload(100);
+    } catch {
+      // fallback to JSON payload on any database error
+    }
+  }
 
   try {
     const raw = await readFile(resultsPath, 'utf-8');
@@ -184,7 +192,7 @@ export const createServer = ({ engine, publicDir }) => {
     }
 
     if (pathname === '/api/results') {
-      createJsonResponse(res, await readResultsPayload(resultsPath));
+      createJsonResponse(res, await readResultsPayload({ resultsPath, database: engine.database }));
       return;
     }
 
@@ -194,7 +202,7 @@ export const createServer = ({ engine, publicDir }) => {
     }
 
     if (pathname === '/portfolio' || pathname === '/api/portfolio') {
-      const results = await readResultsPayload(resultsPath);
+      const results = await readResultsPayload({ resultsPath, database: engine.database });
       createJsonResponse(res, {
         portfolioValue: results.portfolioValue,
         positions: results.positions,
@@ -204,8 +212,17 @@ export const createServer = ({ engine, publicDir }) => {
     }
 
     if (pathname === '/api/signals' || pathname === '/signals') {
-      const results = await readResultsPayload(resultsPath);
+      const results = await readResultsPayload({ resultsPath, database: engine.database });
       createJsonResponse(res, results.signals);
+      return;
+    }
+
+    if (pathname === '/api/risk-events' || pathname === '/risk-events') {
+      if (engine.database) {
+        createJsonResponse(res, engine.database.readRiskEvents(100));
+        return;
+      }
+      createJsonResponse(res, []);
       return;
     }
 

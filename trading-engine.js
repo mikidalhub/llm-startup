@@ -87,6 +87,7 @@ export class TradingEngine {
     this.fetchFn = dependencies.fetchFn ?? fetch;
     this.writeFileFn = dependencies.writeFileFn ?? writeFile;
     this.clock = dependencies.clock ?? (() => new Date().toISOString());
+    this.database = dependencies.database ?? null;
 
     this.portfolio = {
       cash: config.capital,
@@ -167,7 +168,7 @@ export class TradingEngine {
     }
   }
 
-  executeTrade(symbol, snapshot, decision) {
+  executeTrade(symbol, snapshot, decision, tradeTimestamp = this.clock()) {
     const action = String(decision.action || 'HOLD').toUpperCase();
     const sizePct = clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct);
     const notional = this.getPortfolioValue() * sizePct;
@@ -197,9 +198,10 @@ export class TradingEngine {
       }
     }
 
-    const trade = { ts: new Date().toISOString(), symbol, action, status, sizePct, shares: Number(shares.toFixed(6)), price: snapshot.price, reason: decision.reason || 'No reason supplied' };
+    const trade = { ts: tradeTimestamp, symbol, action, status, sizePct, shares: Number(shares.toFixed(6)), price: snapshot.price, reason: decision.reason || 'No reason supplied' };
     this.portfolio.trades.push(trade);
     if (this.portfolio.trades.length > 300) this.portfolio.trades = this.portfolio.trades.slice(-300);
+    return trade;
   }
 
   getPortfolioValue() {
@@ -383,7 +385,7 @@ export class TradingEngine {
 
   updateMetrics() {
     const portfolioValue = this.getPortfolioValue();
-    this.portfolio.equityCurve.push({ ts: new Date().toISOString(), value: portfolioValue });
+    this.portfolio.equityCurve.push({ ts: this.clock(), value: portfolioValue });
     if (this.portfolio.equityCurve.length > 500) this.portfolio.equityCurve = this.portfolio.equityCurve.slice(-500);
 
     const pnl = portfolioValue - this.config.capital;
@@ -413,18 +415,49 @@ export class TradingEngine {
       timestamp: snapshot.ts
     }));
 
+    const timestamp = this.clock();
+
+    if (this.database) {
+      this.database.recordPortfolioSnapshot({
+        ts: timestamp,
+        portfolioValue: this.getPortfolioValue(),
+        cash: this.portfolio.cash,
+        positions: this.portfolio.positions,
+        metrics: this.portfolio.metrics,
+        lastError: this.lastError
+      });
+    }
+
     await this.writeFileFn(this.config.outputPath, JSON.stringify({
-      timestamp: new Date().toISOString(),
+      timestamp,
       portfolioValue: this.getPortfolioValue(),
       positions: this.portfolio.positions,
       trades: this.portfolio.trades,
       signals,
-      updatedAt: new Date().toISOString(),
+      updatedAt: timestamp,
       config: this.config,
       snapshots: this.snapshots,
       portfolio: this.portfolio,
       lastError: this.lastError
     }, null, 2));
+  }
+
+
+
+  async bootstrapFromStorage() {
+    if (!this.database) return;
+
+    const restored = this.database.loadLatestState(this.config.capital);
+    if (!restored) return;
+    this.portfolio = {
+      ...this.portfolio,
+      ...restored.portfolio,
+      trades: restored.portfolio.trades ?? this.portfolio.trades,
+      equityCurve: restored.portfolio.equityCurve?.length ? restored.portfolio.equityCurve : this.portfolio.equityCurve,
+      metrics: restored.portfolio.metrics ?? this.portfolio.metrics
+    };
+    this.snapshots = restored.snapshots ?? {};
+    this.lastError = restored.lastError;
   }
 
   async tick(source = 'SCHEDULED') {
@@ -434,13 +467,13 @@ export class TradingEngine {
     }
 
     this.isTicking = true;
-    this.status = { stage: 'START', message: `Process started (${source})`, running: true, lastRunAt: new Date().toISOString() };
+    this.status = { stage: 'START', message: `Process started (${source})`, running: true, lastRunAt: this.clock() };
     this.emitEvent('tick-started', { source, symbols: this.config.symbols });
 
     const errors = [];
     try {
       for (const symbol of this.config.symbols) {
-        this.status = { stage: 'FETCHING', message: `Fetching market data for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
+        this.status = { stage: 'FETCHING', message: `Fetching market data for ${symbol}`, running: true, lastRunAt: this.clock() };
         this.emitEvent('symbol-fetch-started', { symbol });
         let snapshot;
         try {
@@ -453,28 +486,56 @@ export class TradingEngine {
         }
         this.snapshots[symbol] = snapshot;
 
-        this.status = { stage: 'DECIDING', message: `AI decision for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
+        this.status = { stage: 'DECIDING', message: `AI decision for ${symbol}`, running: true, lastRunAt: this.clock() };
         const decision = await this.llmDecide(snapshot);
+        const decisionTimestamp = this.clock();
         this.emitEvent('decision-made', { symbol, action: decision.action, size_pct: decision.size_pct });
 
-        this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: new Date().toISOString() };
-        this.executeTrade(symbol, snapshot, decision);
+        if (this.database) {
+          this.database.recordDecision({
+            ts: decisionTimestamp,
+            symbol,
+            action: String(decision.action || 'HOLD').toUpperCase(),
+            sizePct: clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct),
+            reason: decision.reason || 'No reason supplied',
+            source
+          });
+        }
+
+        this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
+        const trade = this.executeTrade(symbol, snapshot, decision, decisionTimestamp);
+
+        if (this.database) {
+          this.database.recordTrade(trade);
+          this.database.recordSnapshot(snapshot);
+          if (snapshot.rsi <= 30 || snapshot.rsi >= 70) {
+            this.database.recordRiskEvent({
+              ts: decisionTimestamp,
+              symbol,
+              level: snapshot.rsi <= 30 ? 'ELEVATED_BUY_SIGNAL' : 'ELEVATED_SELL_SIGNAL',
+              message: snapshot.rsi <= 30 ? 'Oversold threshold breached.' : 'Overbought threshold breached.',
+              metadata: { rsi: snapshot.rsi, price: snapshot.price }
+            });
+          }
+        }
+
         this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price });
       }
 
       this.lastError = errors.length ? errors.join(' | ') : null;
-      this.status = { stage: 'PERSISTING', message: 'Saving results', running: true, lastRunAt: new Date().toISOString() };
+      this.status = { stage: 'PERSISTING', message: 'Saving results', running: true, lastRunAt: this.clock() };
       this.updateMetrics();
       await this.persistResults();
       this.notify();
       this.emitEvent('tick-finished', { source, errors: this.lastError });
     } finally {
-      this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: new Date().toISOString() };
+      this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: this.clock() };
       this.isTicking = false;
     }
   }
 
   async start() {
+    await this.bootstrapFromStorage();
     await this.tick('BOOT');
     this.timer = setInterval(() => {
       void this.tick('SCHEDULED');
@@ -487,7 +548,7 @@ export class TradingEngine {
 
   getState() {
     return {
-      timestamp: new Date().toISOString(),
+      timestamp: this.clock(),
       config: this.config,
       snapshots: this.snapshots,
       portfolio: this.portfolio,

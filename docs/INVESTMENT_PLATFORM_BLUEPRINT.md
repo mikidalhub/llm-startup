@@ -23,14 +23,15 @@
 - `scanner/market-scanner.js`: S&P500/Nasdaq/Dividend list scanning and ranking.
 - `explainer/investment-explainer.js`: human reasoning + traffic lights.
 
-## 3) Database Structure (JSON-first, DB-ready)
-Runtime is persisted in `results.json`. A relational migration can use:
-- `companies(ticker PK, name, sector, industry, market_cap)`
-- `fundamental_snapshots(id PK, ticker FK, as_of, pe, fwd_pe, peg, pfcf, debt_equity, roe, roic, rev_growth, eps_growth, fcf_growth, div_yield, div_growth, fundamental_score)`
-- `risk_snapshots(id PK, ticker FK, as_of, volatility, drawdown, beta, correlation, concentration, risk_label, risk_number)`
-- `dividend_snapshots(id PK, ticker FK, as_of, yield, payout_ratio, div_growth_score, div_score, annual_income_projection)`
-- `portfolio_states(id PK, as_of, cash, total_value, pnl, return_pct, sharpe, health_score)`
-- `daily_briefs(id PK, as_of, market_overview, top_opportunities_json, warnings_json, dividend_update_json)`
+## 3) Database Structure (DB-first + JSON compatibility fallback)
+Runtime persistence now uses SQLite (`db.js`) as the source of truth for durability, recovery, and auditability:
+- `decisions(id PK, created_at, symbol, action, size_pct, reason, source)`
+- `trades(id PK, created_at, symbol, action, status, size_pct, shares, price, reason)`
+- `snapshots(id PK, created_at, symbol, price, volume, rsi, source)`
+- `portfolio_snapshots(id PK, created_at, portfolio_value, cash, positions_json, metrics_json, last_error)`
+- `risk_events(id PK, created_at, symbol, level, message, metadata_json)`
+
+`results.json` remains a short-term compatibility layer and is still written after each tick for existing consumers. API reads are DB-first with JSON fallback if SQLite is unavailable.
 
 ## 4) API Endpoints
 - Existing:
@@ -83,11 +84,12 @@ Runtime is persisted in `results.json`. A relational migration can use:
   - Dividend income monthly/annual projection
 
 ## 8) UI Concept
-4 panel dashboard:
-1. Portfolio Health Meter (0–100)
-2. Top Opportunities cards
-3. Dividend Income Tracker (monthly + annual)
-4. Market Signals (risk + scan trends)
+Mobile-first premium trading flow (progressive disclosure):
+1. Home focus card: total portfolio value + day change + one highlighted asset.
+2. Horizontal swipe between assets; tap expands details.
+3. Full-screen chart-first asset view with hidden controls (timeframes, indicators) revealed on interaction.
+4. Two-step trade flow: action slider + clean confirmation sheet.
+5. Transaction history as an expandable bottom layer, hidden by default.
 
 ## 9) Beginner UX Design
 - Traffic-light indicators: Green/Yellow/Red for Value, Quality, Risk, Income.

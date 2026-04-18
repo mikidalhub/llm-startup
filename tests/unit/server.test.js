@@ -15,7 +15,8 @@ const mockState = {
 const buildMockEngine = () => ({
   getState: () => mockState,
   onUpdate: () => () => {},
-  tick: () => {}
+  tick: () => {},
+  database: null
 });
 
 const requestJson = async (port, path) => {
@@ -55,6 +56,41 @@ test('createServer exposes JSON APIs', async () => {
     assert.equal(healthResponse.status, 200);
     assert.equal(healthResponse.json.status, 'ok');
     assert.equal(healthResponse.json.container, 'running');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('createServer prefers database-backed results payload when available', async () => {
+  const server = createServer({
+    engine: {
+      ...buildMockEngine(),
+      database: {
+        readResultsPayload: () => ({
+          timestamp: '2026-01-01T00:00:00.000Z',
+          portfolioValue: 12500,
+          positions: { NVDA: { shares: 5, avgCost: 600 } },
+          trades: [{ symbol: 'NVDA', action: 'BUY' }],
+          signals: [{ symbol: 'NVDA', signal: 'BUY' }]
+        }),
+        readRiskEvents: () => [{ symbol: 'NVDA', level: 'ELEVATED_BUY_SIGNAL' }]
+      }
+    },
+    publicDir: new URL('../../public/', import.meta.url)
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  try {
+    const resultsResponse = await requestJson(port, '/api/results');
+    assert.equal(resultsResponse.status, 200);
+    assert.equal(resultsResponse.json.portfolioValue, 12500);
+    assert.equal(resultsResponse.json.trades[0].symbol, 'NVDA');
+
+    const riskEventsResponse = await requestJson(port, '/api/risk-events');
+    assert.equal(riskEventsResponse.status, 200);
+    assert.equal(riskEventsResponse.json[0].symbol, 'NVDA');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
