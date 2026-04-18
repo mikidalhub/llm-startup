@@ -105,7 +105,10 @@ export class TradingDatabase {
         CASE WHEN rsi < 35 THEN 'BUY' WHEN rsi > 70 THEN 'SELL' ELSE 'HOLD' END AS signal
         FROM snapshots ORDER BY id DESC LIMIT ?
       `),
-      recentRiskEvents: this.db.prepare('SELECT created_at, symbol, level, message, metadata_json FROM risk_events ORDER BY id DESC LIMIT ?')
+      recentRiskEvents: this.db.prepare('SELECT created_at, symbol, level, message, metadata_json FROM risk_events ORDER BY id DESC LIMIT ?'),
+      recentDecisions: this.db.prepare('SELECT id, created_at, symbol, action, size_pct AS sizePct, reason, source FROM decisions ORDER BY id DESC LIMIT ?'),
+      decisionById: this.db.prepare('SELECT id, created_at, symbol, action, size_pct AS sizePct, reason, source FROM decisions WHERE id = ?'),
+      latestTradeForDecision: this.db.prepare('SELECT created_at, action, status, shares, price, reason FROM trades WHERE symbol = ? AND created_at >= ? ORDER BY id ASC LIMIT 1')
     };
   }
 
@@ -214,5 +217,43 @@ export class TradingDatabase {
       message: event.message,
       metadata: parseJson(event.metadata_json, {})
     }));
+  }
+
+  readDecisions(limit = 100) {
+    return this.statements.recentDecisions.all(limit).reverse().map((decision) => ({
+      id: decision.id,
+      ts: decision.created_at,
+      symbol: decision.symbol,
+      action: decision.action,
+      sizePct: decision.sizePct,
+      reason: decision.reason,
+      source: decision.source
+    }));
+  }
+
+  readDecisionById(id) {
+    const decision = this.statements.decisionById.get(id);
+    if (!decision) return null;
+    const relatedTrade = this.statements.latestTradeForDecision.get(decision.symbol, decision.created_at);
+
+    return {
+      id: decision.id,
+      ts: decision.created_at,
+      symbol: decision.symbol,
+      action: decision.action,
+      sizePct: decision.sizePct,
+      reason: decision.reason,
+      source: decision.source,
+      trade: relatedTrade
+        ? {
+          ts: relatedTrade.created_at,
+          action: relatedTrade.action,
+          status: relatedTrade.status,
+          shares: relatedTrade.shares,
+          price: relatedTrade.price,
+          reason: relatedTrade.reason
+        }
+        : null
+    };
   }
 }

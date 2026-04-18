@@ -3,25 +3,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
+  Button,
   Chip,
   Collapse,
   Divider,
   Drawer,
   LinearProgress,
   Stack,
-  Switch,
+  Tooltip,
   Typography,
   alpha
 } from '@mui/material';
-
-type AgentStatus = 'idle' | 'thinking' | 'completed' | 'failed';
 
 type EngineState = {
   snapshots?: Record<string, { symbol: string; price: number; rsi: number; ts: string }>;
   status?: { stage?: string; running?: boolean; message?: string; lastRunAt?: string | null };
   portfolio?: {
-    metrics?: { portfolioValue?: number };
+    metrics?: {
+      portfolioValue?: number;
+      pnl?: number;
+      sharpe?: number;
+      winRate?: number;
+      maxDrawdown?: number;
+      avgProfitPerTrade?: number;
+    };
     positions?: Record<string, { shares: number; avgCost: number }>;
+    equityCurve?: Array<{ ts: string; value: number }>;
   };
   lastError?: string | null;
 };
@@ -38,138 +45,44 @@ type ProcessEvent = {
   errors?: string | null;
 };
 
-type AgentNode = {
-  id: string;
-  title: string;
-  role: string;
-  status: AgentStatus;
-  explanation: string;
-  output: { signal: string; confidence: string; factors: string[] };
-};
-
-type ResultsPayload = {
-  trades?: Array<{ ts?: string; symbol: string; action: string; price: number; reason?: string }>;
-  signals?: Array<{ timestamp?: string; symbol: string; signal: string; rsi: number; price: number }>;
-};
+type Trade = { ts?: string; symbol: string; action: string; price: number; reason?: string; status?: string; shares?: number };
+type Decision = { id?: number | string; ts?: string; symbol?: string; action?: string; sizePct?: number; reason?: string; source?: string; trade?: Trade | null };
+type ResultsPayload = { trades?: Trade[]; signals?: Array<{ timestamp?: string; symbol: string; signal: string; rsi: number; price: number }> };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
+const formatPct = (value: number) => `${(value || 0).toFixed(2)}%`;
 
-const pipelineBlueprint = [
-  { id: 'market', title: 'Market Input', role: 'Data Feed' },
-  { id: 'analyst', title: 'Analyst Agents', role: 'Signal Extraction' },
-  { id: 'debate', title: 'Debate Layer', role: 'Reasoning Consensus' },
-  { id: 'trader', title: 'Trader', role: 'Allocation Decision' },
-  { id: 'risk', title: 'Risk', role: 'Constraint Guardrail' },
-  { id: 'execution', title: 'Execution', role: 'Order Simulation' }
-] as const;
-
-const statusColor: Record<AgentStatus, string> = {
-  idle: '#64748b',
-  thinking: '#38bdf8',
-  completed: '#22c55e',
-  failed: '#f87171'
-};
-
-const stageToNode: Record<string, string> = {
-  START: 'market',
-  FETCHING: 'market',
-  DECIDING: 'debate',
-  TRADING: 'trader',
-  PERSISTING: 'execution',
-  IDLE: 'execution'
-};
-
-const buildNodeDetails = (nodeId: string, event: ProcessEvent, state: EngineState): Pick<AgentNode, 'explanation' | 'output'> => {
-  const snapshot = event.symbol ? state.snapshots?.[event.symbol] : undefined;
-
-  if (nodeId === 'market') {
-    return {
-      explanation: `Ingesting live Yahoo market data ${event.symbol ? `for ${event.symbol}` : ''}. Streaming price + RSI snapshots into shared context.`,
-      output: {
-        signal: snapshot ? `${snapshot.symbol} @ ${formatUsd(snapshot.price)}` : 'Waiting for feed',
-        confidence: 'High',
-        factors: [`RSI ${snapshot?.rsi?.toFixed?.(1) ?? 'n/a'}`, `Tick ${snapshot?.ts ?? event.timestamp ?? 'pending'}`]
-      }
-    };
-  }
-
-  if (nodeId === 'analyst') {
-    const rsi = snapshot?.rsi ?? event.rsi;
-    const signal = typeof rsi === 'number' ? (rsi <= 35 ? 'BUY bias' : rsi >= 70 ? 'SELL bias' : 'HOLD bias') : 'Neutral';
-    return {
-      explanation: 'Specialist analyst agents transform raw market snapshots into factor-level assessments (momentum, volatility, position context).',
-      output: {
-        signal,
-        confidence: typeof rsi === 'number' ? `${Math.min(95, Math.max(52, Math.round(100 - Math.abs(50 - rsi))))}%` : '58%',
-        factors: [`Momentum RSI: ${typeof rsi === 'number' ? rsi.toFixed(2) : 'n/a'}`, `Symbol: ${event.symbol ?? snapshot?.symbol ?? 'n/a'}`]
-      }
-    };
-  }
-
-  if (nodeId === 'debate') {
-    return {
-      explanation: 'Reasoning agents reconcile analyst disagreement, challenge assumptions, and produce a structured decision recommendation.',
-      output: {
-        signal: (event.action || 'HOLD').toUpperCase(),
-        confidence: `${Math.round((event.size_pct ?? 0.06) * 500)}%`,
-        factors: [event.reason || 'Fallback logic from RSI regime', `Size cap ${(event.size_pct ?? 0).toFixed(2)}`]
-      }
-    };
-  }
-
-  if (nodeId === 'trader') {
-    return {
-      explanation: 'Trader agent converts the consensus action into constrained order sizing and position intent.',
-      output: {
-        signal: (event.action || 'HOLD').toUpperCase(),
-        confidence: 'Execution-ready',
-        factors: [`Symbol ${event.symbol ?? 'n/a'}`, `Notional size ${(event.size_pct ?? 0).toFixed(2)}`]
-      }
-    };
-  }
-
-  if (nodeId === 'risk') {
-    const riskFlag = state.lastError ? 'elevated' : 'normal';
-    return {
-      explanation: 'Risk layer validates limits, detects unstable data paths, and logs elevated conditions before execution persists.',
-      output: {
-        signal: riskFlag === 'elevated' ? 'Guarded' : 'Approved',
-        confidence: riskFlag === 'elevated' ? '62%' : '90%',
-        factors: [state.lastError ? `Issue: ${state.lastError}` : 'No active breaches', 'Position limits enforced']
-      }
-    };
-  }
-
-  return {
-    explanation: 'Execution layer records final state transitions, trades, and decision artifacts to persistent history.',
-    output: {
-      signal: event.type === 'tick-finished' ? 'Committed' : 'Pending',
-      confidence: event.type === 'tick-finished' ? '100%' : '—',
-      factors: [`Last run: ${state.status?.lastRunAt ?? 'n/a'}`, 'DB-first persistence + JSON fallback']
-    }
-  };
+const metricHelp: Record<string, string> = {
+  sharpe: 'Risk-adjusted return. Higher usually means better efficiency.',
+  maxDrawdown: 'Largest peak-to-trough decline in equity.',
+  winRate: 'Percent of filled non-HOLD trades currently positive in this simulation.',
+  avgProfitPerTrade: 'Average signed value per filled non-HOLD trade.'
 };
 
 export default function HomePage() {
   const [engineState, setEngineState] = useState<EngineState>({});
   const [results, setResults] = useState<ResultsPayload>({ trades: [], signals: [] });
   const [events, setEvents] = useState<ProcessEvent[]>([]);
-  const [activeNodeId, setActiveNodeId] = useState<string>('market');
-  const [showHistory, setShowHistory] = useState(false);
-  const [advancedView, setAdvancedView] = useState(false);
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [showPipeline, setShowPipeline] = useState(false);
 
   useEffect(() => {
     const hydrate = async () => {
       try {
-        const [stateRes, resultsRes] = await Promise.all([
+        const [stateRes, resultsRes, decisionsRes] = await Promise.all([
           fetch(`${API_BASE}/api/state`),
-          fetch(`${API_BASE}/api/results`)
+          fetch(`${API_BASE}/api/results`),
+          fetch(`${API_BASE}/api/decisions`)
         ]);
+
         if (stateRes.ok) setEngineState(await stateRes.json());
         if (resultsRes.ok) setResults(await resultsRes.json());
+        if (decisionsRes.ok) setDecisions(await decisionsRes.json());
       } catch {
-        // quiet mode for offline preview
+        // offline preview
       }
     };
 
@@ -180,16 +93,14 @@ export default function HomePage() {
       const stream = new EventSource(`${API_BASE}/events`);
       stream.addEventListener('state', (raw) => {
         try {
-          const payload = JSON.parse((raw as MessageEvent).data) as EngineState;
-          setEngineState(payload);
+          setEngineState(JSON.parse((raw as MessageEvent).data) as EngineState);
         } catch {
           // ignore malformed event
         }
       });
       stream.addEventListener('process', (raw) => {
         try {
-          const payload = JSON.parse((raw as MessageEvent).data) as ProcessEvent;
-          setEvents((prev) => [...prev, payload].slice(-120));
+          setEvents((prev) => [...prev, JSON.parse((raw as MessageEvent).data) as ProcessEvent].slice(-150));
         } catch {
           // ignore malformed event
         }
@@ -204,177 +115,258 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  const latestEvent = events.at(-1) || {};
-  const activeStageNode = stageToNode[engineState.status?.stage || 'IDLE'] || 'market';
+  const metrics = engineState.portfolio?.metrics || {};
+  const equityCurve = engineState.portfolio?.equityCurve || [];
+  const trades = (results.trades || []).slice(-16).reverse();
+  const dailyChange = equityCurve.length > 1 ? equityCurve.at(-1)!.value - equityCurve.at(-2)!.value : 0;
+  const netProfit = metrics.pnl || 0;
+  const revenue = useMemo(() => {
+    return (results.trades || [])
+      .filter((trade) => trade.status === 'FILLED')
+      .reduce((sum, trade) => sum + ((trade.action === 'SELL' ? 1 : -1) * ((trade.shares || 0) * trade.price)), 0);
+  }, [results.trades]);
 
-  const nodes: AgentNode[] = useMemo(() => {
-    const failed = Boolean(engineState.lastError);
-    return pipelineBlueprint.map((node, index) => {
-      const activeIndex = pipelineBlueprint.findIndex((item) => item.id === activeStageNode);
-      let status: AgentStatus = 'idle';
-      if (failed && node.id === 'risk') status = 'failed';
-      else if (index < activeIndex) status = 'completed';
-      else if (node.id === activeStageNode && engineState.status?.running) status = 'thinking';
-      else if (!engineState.status?.running && index <= activeIndex) status = 'completed';
+  const selectedDecision = useMemo(() => {
+    if (!selectedTrade) return null;
+    return [...decisions].reverse().find((decision) => decision.symbol === selectedTrade.symbol && decision.action === selectedTrade.action) || null;
+  }, [decisions, selectedTrade]);
 
-      const details = buildNodeDetails(node.id, latestEvent, engineState);
-      return { ...node, status, ...details };
-    });
-  }, [activeStageNode, engineState, latestEvent]);
-
-  const activeNode = nodes.find((node) => node.id === activeNodeId) || nodes[0];
-  const latestSnapshot = Object.values(engineState.snapshots || {}).at(-1);
-  const lastTrade = (results.trades || []).at(-1);
-  const positionCount = Object.keys(engineState.portfolio?.positions || {}).length;
+  const similarSituations = useMemo(() => {
+    if (!selectedTrade) return [];
+    return (results.trades || [])
+      .filter((trade) => trade.symbol === selectedTrade.symbol && trade.action === selectedTrade.action)
+      .slice(-4);
+  }, [results.trades, selectedTrade]);
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#030507', color: '#e2e8f0', p: 2.2 }}>
-      <Stack spacing={2}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 0.5 }}>
-          <Stack spacing={0.4}>
-            <Typography sx={{ letterSpacing: '0.22em', fontSize: 11, color: 'rgba(148,163,184,0.75)' }}>TRADING AGENT</Typography>
-            <Typography sx={{ fontSize: 22, fontWeight: 300 }}>Decision Engine</Typography>
-          </Stack>
-          <Stack alignItems="flex-end" spacing={0.3}>
-            <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>Position {positionCount}</Typography>
-            <Typography sx={{ fontSize: 16, fontWeight: 300 }}>{formatUsd(engineState.portfolio?.metrics?.portfolioValue || 0)}</Typography>
-          </Stack>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#030508', color: '#e2e8f0', p: 2.4 }}>
+      <Stack spacing={1.8} sx={{ mr: { md: '360px', xs: 0 } }}>
+        <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: '#7c8ca3' }}>AI MULTI-AGENT TRADING</Typography>
+
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
+          <MetricCard title="Portfolio Value" value={formatUsd(metrics.portfolioValue || 0)} subtitle="Live equity" />
+          <MetricCard title="Net Profit" value={formatUsd(netProfit)} subtitle="After costs" positive={netProfit >= 0} />
+          <MetricCard title="Daily Change" value={formatUsd(dailyChange)} subtitle="Last step delta" positive={dailyChange >= 0} />
+          <MetricCard title="Revenue" value={formatUsd(revenue)} subtitle="From actions" positive={revenue >= 0} />
         </Stack>
 
-        <Stack direction="row" spacing={1} sx={{ p: 1.2, borderRadius: 4, bgcolor: alpha('#0f172a', 0.45), backdropFilter: 'blur(14px)' }}>
-          <Chip label={`${latestSnapshot?.symbol || 'MKT'} ${latestSnapshot ? formatUsd(latestSnapshot.price) : '—'}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#cbd5e1' }} />
-          <Chip label={`Trend RSI ${latestSnapshot?.rsi?.toFixed?.(1) ?? 'n/a'}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#cbd5e1' }} />
-          <Chip label={`Position ${positionCount}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#cbd5e1' }} />
-        </Stack>
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
+          <GlassPanel sx={{ flex: 1, minHeight: 250 }}>
+            <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Equity curve</Typography>
+            <EquityCurve points={equityCurve} />
+          </GlassPanel>
 
-        <Box sx={{ borderRadius: 5, p: 2, bgcolor: alpha('#0f172a', 0.38), boxShadow: '0 22px 50px rgba(2,6,23,0.45)' }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-            <Typography sx={{ fontSize: 13, color: '#94a3b8' }}>Multi-agent live pipeline</Typography>
-            <Stack direction="row" spacing={0.8} alignItems="center">
-              <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>Advanced</Typography>
-              <Switch size="small" checked={advancedView} onChange={(_, checked) => setAdvancedView(checked)} />
+          <GlassPanel sx={{ flex: 1 }}>
+            <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Recent trades</Typography>
+            <Stack spacing={0.7}>
+              {trades.map((trade, index) => (
+                <Box
+                  key={`${trade.ts || index}-${trade.symbol}`}
+                  onClick={() => setSelectedTrade(trade)}
+                  sx={{
+                    p: 1,
+                    borderRadius: 1.6,
+                    cursor: 'pointer',
+                    border: `1px solid ${alpha(trade.action === 'BUY' ? '#22c55e' : '#f97316', 0.35)}`,
+                    bgcolor: alpha('#0b1220', 0.55)
+                  }}
+                >
+                  <Stack direction="row" justifyContent="space-between">
+                    <Typography sx={{ fontSize: 12.5 }}>{trade.symbol} · {trade.action}</Typography>
+                    <Typography sx={{ fontSize: 12.5, color: trade.action === 'BUY' ? '#86efac' : '#fdba74' }}>{formatUsd(trade.price)}</Typography>
+                  </Stack>
+                  <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>{trade.reason || 'No reason provided'}</Typography>
+                </Box>
+              ))}
+              {!trades.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No trades yet.</Typography> : null}
             </Stack>
-          </Stack>
+          </GlassPanel>
+        </Stack>
 
-          <Box sx={{ overflowX: 'auto', pb: 1 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 980 }}>
-              {nodes.map((node, index) => (
-                <Stack direction="row" alignItems="center" spacing={1} key={node.id}>
-                  <Box
-                    onClick={() => setActiveNodeId(node.id)}
-                    sx={{
-                      cursor: 'pointer',
-                      px: 1.4,
-                      py: 1.2,
-                      minWidth: 146,
-                      borderRadius: 3.2,
-                      bgcolor: activeNodeId === node.id ? alpha('#1e293b', 0.95) : alpha('#0f172a', 0.72),
-                      boxShadow: node.status === 'thinking' ? `0 0 24px ${alpha(statusColor[node.status], 0.45)}` : 'none',
-                      border: `1px solid ${alpha(statusColor[node.status], activeNodeId === node.id ? 0.5 : 0.24)}`,
-                      transition: 'all 220ms ease'
-                    }}
-                  >
-                    <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 0.2 }}>{node.role}</Typography>
-                    <Typography sx={{ fontSize: 15, fontWeight: 300 }}>{node.title}</Typography>
-                    <Stack direction="row" alignItems="center" spacing={0.7} sx={{ mt: 0.8 }}>
-                      <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: statusColor[node.status] }} />
-                      <Typography sx={{ fontSize: 11, color: alpha('#e2e8f0', 0.88) }}>{node.status}</Typography>
-                    </Stack>
-                  </Box>
-                  {index < nodes.length - 1 ? (
-                    <Box sx={{ width: 62, height: 2, borderRadius: 5, bgcolor: alpha(nodes[index + 1].status === 'thinking' ? '#38bdf8' : '#334155', 0.85), position: 'relative', overflow: 'hidden' }}>
-                      {nodes[index + 1].status === 'thinking' ? <LinearProgress sx={{ position: 'absolute', inset: 0, bgcolor: 'transparent' }} /> : null}
-                    </Box>
-                  ) : null}
-                </Stack>
+        <GlassPanel>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+            <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Core metrics</Typography>
+            <Stack direction="row" spacing={0.8}>
+              {(['sharpe', 'maxDrawdown', 'winRate', 'avgProfitPerTrade'] as const).map((key) => (
+                <Tooltip key={key} title={metricHelp[key]}>
+                  <Chip
+                    size="small"
+                    label={`${key === 'avgProfitPerTrade' ? 'avg/trade' : key}: ${key.includes('Rate') || key.includes('Drawdown') ? formatPct(Number(metrics[key] || 0)) : key === 'avgProfitPerTrade' ? formatUsd(Number(metrics[key] || 0)) : Number(metrics[key] || 0).toFixed(2)}`}
+                    sx={{ borderRadius: 1.4, bgcolor: alpha('#0f172a', 0.68), color: '#cbd5e1' }}
+                  />
+                </Tooltip>
               ))}
             </Stack>
-          </Box>
+          </Stack>
 
-          <Collapse in={advancedView}>
-            <Stack direction="row" spacing={1.2} sx={{ mt: 1.8 }}>
-              <Chip label={`latency ${Math.max(120, events.length * 3)}ms`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#bae6fd' }} />
-              <Chip label={`tool calls ${events.filter((event) => event.type?.includes('symbol')).length}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#bae6fd' }} />
-              <Chip label={`agent states ${nodes.filter((node) => node.status !== 'idle').length}/${nodes.length}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,0.9)', color: '#bae6fd' }} />
-            </Stack>
-          </Collapse>
+          <Stack direction="row" spacing={0.8} flexWrap="wrap">
+            <Chip size="small" label="timeline history" sx={badgeSx} />
+            <Chip size="small" label="memory badge" sx={badgeSx} />
+            <Chip size="small" label="stored insights" sx={badgeSx} />
+            <Chip size="small" label={engineState.lastError ? 'risk: guarded' : 'risk: normal'} sx={badgeSx} />
+          </Stack>
+        </GlassPanel>
+
+        <Box
+          onClick={() => setShowTimeline((v) => !v)}
+          sx={{ p: 1, borderRadius: 1.6, bgcolor: alpha('#0b1220', 0.55), border: '1px solid rgba(148,163,184,0.18)', cursor: 'pointer' }}
+        >
+          <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Learning timeline · {(results.trades || []).length} outcomes</Typography>
         </Box>
+
+        <Collapse in={showTimeline}>
+          <GlassPanel sx={{ maxHeight: 220, overflowY: 'auto' }}>
+            {(results.trades || []).slice(-20).reverse().map((trade, index) => (
+              <Stack key={`${trade.ts || index}-${trade.symbol}`} direction="row" justifyContent="space-between" sx={{ py: 0.6 }}>
+                <Typography sx={{ fontSize: 12.3 }}>{trade.symbol} · {trade.action}</Typography>
+                <Typography sx={{ fontSize: 12.3, color: trade.action === 'BUY' ? '#86efac' : '#fdba74' }}>{trade.ts ? new Date(trade.ts).toLocaleString() : 'n/a'}</Typography>
+              </Stack>
+            ))}
+          </GlassPanel>
+        </Collapse>
       </Stack>
 
       <Drawer
         anchor="right"
         open
         variant="persistent"
-        PaperProps={{ sx: { width: 340, bgcolor: '#070b12', color: '#e2e8f0', p: 2.2, borderLeft: '1px solid rgba(148,163,184,0.12)' } }}
+        PaperProps={{
+          sx: {
+            width: 340,
+            bgcolor: alpha('#050911', 0.88),
+            color: '#e2e8f0',
+            p: 2,
+            borderLeft: '1px solid rgba(148,163,184,0.16)',
+            backdropFilter: 'blur(14px) saturate(120%)'
+          }
+        }}
       >
-        <Typography sx={{ fontSize: 11, letterSpacing: '0.16em', color: '#64748b' }}>REASONING PANEL</Typography>
-        <Typography sx={{ fontSize: 22, fontWeight: 300, mt: 0.4 }}>{activeNode.title}</Typography>
-        <Typography sx={{ fontSize: 13, color: '#94a3b8', mt: 1.4 }}>{activeNode.explanation}</Typography>
+        <Typography sx={{ fontSize: 11, letterSpacing: '0.16em', color: '#64748b' }}>DECISION DETAIL</Typography>
+        <Typography sx={{ fontSize: 20, fontWeight: 300, mt: 0.4 }}>{selectedTrade ? `${selectedTrade.symbol} · ${selectedTrade.action}` : 'Select a trade'}</Typography>
+        <Typography sx={{ fontSize: 12.5, color: '#9fb1c8', mt: 1 }}>{selectedTrade?.reason || 'Click any recent trade to inspect reasoning.'}</Typography>
 
-        <Divider sx={{ my: 1.8, borderColor: 'rgba(148,163,184,0.15)' }} />
-        <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>Structured output</Typography>
-        <Stack spacing={1} sx={{ mt: 1 }}>
-          <Row label="Signal" value={activeNode.output.signal} />
-          <Row label="Confidence" value={activeNode.output.confidence} />
-          <Box sx={{ p: 1.2, borderRadius: 2.5, bgcolor: 'rgba(15,23,42,0.6)' }}>
-            <Typography sx={{ fontSize: 11, color: '#94a3b8', mb: 0.6 }}>Factors</Typography>
-            {activeNode.output.factors.map((factor) => (
-              <Typography key={factor} sx={{ fontSize: 12.5, mb: 0.4 }}>• {factor}</Typography>
+        <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Reasoning summary</Typography>
+        <Row label="Confidence" value={selectedDecision ? `${Math.max(56, Math.round((selectedDecision.sizePct || 0.04) * 1000))}%` : '—'} />
+        <Row label="Key factor" value={selectedDecision?.reason || selectedTrade?.reason || 'Momentum + risk gates'} />
+        <Row label="Memory impact" value={similarSituations.length ? `Used ${similarSituations.length} similar outcomes` : 'No similar memory hit'} />
+
+        <Button size="small" sx={{ mt: 1, borderRadius: 1.2 }} onClick={() => setShowPipeline((v) => !v)}>
+          {showPipeline ? 'Hide full pipeline' : 'Show full pipeline'}
+        </Button>
+
+        <Collapse in={showPipeline}>
+          <Stack spacing={0.8} sx={{ mt: 1 }}>
+            {['Analyst', 'Debate', 'Trader', 'Risk'].map((step, index) => (
+              <Box key={step} sx={{ p: 1, borderRadius: 1.4, bgcolor: alpha('#0f172a', 0.55), border: '1px solid rgba(148,163,184,0.15)' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography sx={{ fontSize: 12.5 }}>{step}</Typography>
+                  <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>{index < 2 ? 'Reasoning' : 'Execution'}</Typography>
+                </Stack>
+                <LinearProgress sx={{ mt: 0.8, borderRadius: 1, bgcolor: 'rgba(30,41,59,0.6)' }} variant="determinate" value={68 + index * 8} />
+              </Box>
             ))}
-          </Box>
-        </Stack>
+          </Stack>
+        </Collapse>
 
-        <Divider sx={{ my: 1.8, borderColor: 'rgba(148,163,184,0.15)' }} />
-        <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 0.8 }}>Live logs</Typography>
+        <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live process log</Typography>
         <Stack spacing={0.7} sx={{ maxHeight: '38vh', overflowY: 'auto' }}>
-          {events.slice(-20).reverse().map((event, index) => (
-            <Box key={`${event.timestamp || index}-${event.type || 'event'}`} sx={{ p: 1, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.55)' }}>
+          {events.slice(-18).reverse().map((event, index) => (
+            <Box key={`${event.timestamp || index}-${event.type || 'event'}`} sx={{ p: 0.9, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
               <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}</Typography>
-              <Typography sx={{ fontSize: 12.5, color: '#cbd5e1' }}>
-                {event.symbol ? `${event.symbol} · ` : ''}
-                {event.action ? `action ${event.action}` : event.reason || event.errors || 'state update'}
-              </Typography>
+              <Typography sx={{ fontSize: 12 }}>{event.symbol ? `${event.symbol} · ` : ''}{event.reason || event.action || 'state update'}</Typography>
             </Box>
           ))}
-          {!events.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No live events yet.</Typography> : null}
         </Stack>
-      </Drawer>
 
-      <Box sx={{ position: 'fixed', left: 20, right: 370, bottom: 12 }}>
-        <Box
-          onClick={() => setShowHistory((v) => !v)}
-          sx={{
-            p: 1.1,
-            borderRadius: 3,
-            bgcolor: alpha('#0f172a', 0.8),
-            border: '1px solid rgba(148,163,184,0.2)',
-            cursor: 'pointer'
-          }}
-        >
-          <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>Memory timeline · {(results.trades || []).length} executions</Typography>
-        </Box>
-        <Collapse in={showHistory}>
-          <Box sx={{ mt: 1, p: 1.2, borderRadius: 3, bgcolor: alpha('#0f172a', 0.88), maxHeight: 220, overflowY: 'auto' }}>
-            {(results.trades || []).slice(-20).reverse().map((trade, index) => (
-              <Stack key={`${trade.ts || index}-${trade.symbol}`} direction="row" justifyContent="space-between" sx={{ py: 0.65 }}>
-                <Typography sx={{ fontSize: 12.5 }}>{trade.symbol} · {trade.action}</Typography>
-                <Typography sx={{ fontSize: 12.5, color: trade.action === 'BUY' ? '#4ade80' : '#fda4af' }}>{formatUsd(trade.price)}</Typography>
-              </Stack>
-            ))}
-            {!results.trades?.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>Execution memory is empty.</Typography> : null}
-            {lastTrade ? <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 0.8 }}>Latest: {lastTrade.symbol} {lastTrade.action}</Typography> : null}
-          </Box>
-        </Collapse>
-      </Box>
+        {selectedDecision?.id ? (
+          <Button href={`/decisions?id=${selectedDecision.id}`} size="small" sx={{ mt: 1.4, borderRadius: 1.2 }}>
+            Open decision page
+          </Button>
+        ) : null}
+      </Drawer>
+    </Box>
+  );
+}
+
+function MetricCard({ title, value, subtitle, positive }: { title: string; value: string; subtitle: string; positive?: boolean }) {
+  return (
+    <GlassPanel sx={{ flex: 1 }}>
+      <Typography sx={{ fontSize: 11.5, color: '#8da0bb' }}>{title}</Typography>
+      <Typography sx={{ fontSize: 24, fontWeight: 300, color: positive == null ? '#e2e8f0' : positive ? '#86efac' : '#fca5a5' }}>{value}</Typography>
+      <Typography sx={{ fontSize: 11.5, color: '#64748b' }}>{subtitle}</Typography>
+    </GlassPanel>
+  );
+}
+
+function GlassPanel({ children, sx = {} }: { children: React.ReactNode; sx?: object }) {
+  return (
+    <Box
+      sx={{
+        p: 1.2,
+        borderRadius: 1.8,
+        bgcolor: alpha('#0f172a', 0.46),
+        border: '1px solid rgba(148,163,184,0.18)',
+        backdropFilter: 'blur(14px) saturate(125%)',
+        boxShadow: '0 8px 26px rgba(2,6,23,0.35)',
+        ...sx
+      }}
+    >
+      {children}
     </Box>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <Stack direction="row" justifyContent="space-between" sx={{ p: 1.1, borderRadius: 2.4, bgcolor: 'rgba(15,23,42,0.6)' }}>
+    <Stack direction="row" justifyContent="space-between" sx={{ p: 0.9, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.58), mb: 0.6 }}>
       <Typography sx={{ fontSize: 11.5, color: '#94a3b8' }}>{label}</Typography>
-      <Typography sx={{ fontSize: 12.5 }}>{value}</Typography>
+      <Typography sx={{ fontSize: 12.3, textAlign: 'right', ml: 1 }}>{value}</Typography>
     </Stack>
   );
 }
+
+function EquityCurve({ points }: { points: Array<{ ts: string; value: number }> }) {
+  if (!points.length) return <Typography sx={{ fontSize: 12, color: '#64748b' }}>No equity history yet.</Typography>;
+
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(1, max - min);
+
+  const width = 760;
+  const height = 170;
+  const path = points
+    .map((point, index) => {
+      const x = (index / Math.max(1, points.length - 1)) * (width - 22) + 11;
+      const y = height - (((point.value - min) / spread) * (height - 20) + 10);
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    })
+    .join(' ');
+
+  return (
+    <Box>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="170" role="img" aria-label="equity curve">
+        <defs>
+          <linearGradient id="eq" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.75" />
+            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.1" />
+          </linearGradient>
+        </defs>
+        <path d={path} fill="none" stroke="url(#eq)" strokeWidth="2.2" strokeLinecap="round" />
+      </svg>
+      <Stack direction="row" justifyContent="space-between">
+        <Typography sx={{ fontSize: 11, color: '#64748b' }}>{new Date(points[0].ts).toLocaleTimeString()}</Typography>
+        <Typography sx={{ fontSize: 11, color: '#64748b' }}>{new Date(points.at(-1)!.ts).toLocaleTimeString()}</Typography>
+      </Stack>
+    </Box>
+  );
+}
+
+const badgeSx = {
+  borderRadius: 1.2,
+  bgcolor: alpha('#0f172a', 0.62),
+  color: '#cbd5e1',
+  border: '1px solid rgba(148,163,184,0.2)'
+};

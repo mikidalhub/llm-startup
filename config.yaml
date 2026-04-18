@@ -1,6 +1,10 @@
 symbols:
   - AAPL
   - BTC-USD
+  - MSFT
+  - NVDA
+  - ETH-USD
+  - TSLA
 pollIntervalSeconds: 60
 capital: 10000
 maxPositionPct: 0.1
