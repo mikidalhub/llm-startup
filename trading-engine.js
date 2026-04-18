@@ -87,7 +87,6 @@ export class TradingEngine {
     this.fetchFn = dependencies.fetchFn ?? fetch;
     this.writeFileFn = dependencies.writeFileFn ?? writeFile;
     this.clock = dependencies.clock ?? (() => new Date().toISOString());
-    this.database = dependencies.database ?? null;
     this.redisStore = dependencies.redisStore ?? null;
 
     this.portfolio = {
@@ -435,17 +434,6 @@ export class TradingEngine {
 
     const timestamp = this.clock();
 
-    if (this.database) {
-      this.database.recordPortfolioSnapshot({
-        ts: timestamp,
-        portfolioValue: this.getPortfolioValue(),
-        cash: this.portfolio.cash,
-        positions: this.portfolio.positions,
-        metrics: this.portfolio.metrics,
-        lastError: this.lastError
-      });
-    }
-
     const payload = {
       timestamp,
       portfolioValue: this.getPortfolioValue(),
@@ -467,8 +455,7 @@ export class TradingEngine {
 
 
   async bootstrapFromStorage() {
-    const restored = this.database?.loadLatestState(this.config.capital)
-      ?? (await this.redisStore?.readLatestState())
+    const restored = (await this.redisStore?.readLatestState())
       ?? null;
     if (!restored) return;
 
@@ -524,27 +511,11 @@ export class TradingEngine {
           source
         };
 
-        if (this.database) {
-          this.database.recordDecision(decisionRecord);
-        }
         await this.redisStore?.appendDecision(decisionRecord);
 
         this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
         const trade = this.executeTrade(symbol, snapshot, decision, decisionTimestamp);
 
-        if (this.database) {
-          this.database.recordTrade(trade);
-          this.database.recordSnapshot(snapshot);
-          if (snapshot.rsi <= 30 || snapshot.rsi >= 70) {
-            this.database.recordRiskEvent({
-              ts: decisionTimestamp,
-              symbol,
-              level: snapshot.rsi <= 30 ? 'ELEVATED_BUY_SIGNAL' : 'ELEVATED_SELL_SIGNAL',
-              message: snapshot.rsi <= 30 ? 'Oversold threshold breached.' : 'Overbought threshold breached.',
-              metadata: { rsi: snapshot.rsi, price: snapshot.price }
-            });
-          }
-        }
         await this.redisStore?.appendTrade(trade);
 
         this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price });

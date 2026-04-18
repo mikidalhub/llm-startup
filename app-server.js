@@ -41,7 +41,7 @@ const parseJsonBody = async (req) => {
   }
 };
 
-const readResultsPayload = async ({ resultsPath, database, redisStore }) => {
+const readResultsPayload = async ({ resultsPath, redisStore }) => {
   const fallback = {
     timestamp: new Date().toISOString(),
     portfolioValue: 0,
@@ -49,14 +49,6 @@ const readResultsPayload = async ({ resultsPath, database, redisStore }) => {
     trades: [],
     signals: []
   };
-
-  if (database) {
-    try {
-      return database.readResultsPayload(100);
-    } catch {
-      // fallback to JSON payload on any database error
-    }
-  }
 
   if (redisStore) {
     try {
@@ -201,7 +193,7 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     }
 
     if (pathname === '/api/results') {
-      createJsonResponse(res, await readResultsPayload({ resultsPath, database: engine.database, redisStore }));
+      createJsonResponse(res, await readResultsPayload({ resultsPath, redisStore }));
       return;
     }
 
@@ -211,7 +203,7 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     }
 
     if (pathname === '/portfolio' || pathname === '/api/portfolio') {
-      const results = await readResultsPayload({ resultsPath, database: engine.database, redisStore });
+      const results = await readResultsPayload({ resultsPath, redisStore });
       createJsonResponse(res, {
         portfolioValue: results.portfolioValue,
         positions: results.positions,
@@ -221,16 +213,12 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     }
 
     if (pathname === '/api/signals' || pathname === '/signals') {
-      const results = await readResultsPayload({ resultsPath, database: engine.database, redisStore });
+      const results = await readResultsPayload({ resultsPath, redisStore });
       createJsonResponse(res, results.signals);
       return;
     }
 
     if (pathname === '/api/decisions') {
-      if (engine.database) {
-        createJsonResponse(res, engine.database.readDecisions(200));
-        return;
-      }
       const redisDecisions = await redisStore?.readDecisions(200);
       createJsonResponse(res, redisDecisions || []);
       return;
@@ -238,25 +226,12 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
 
     if (pathname.startsWith('/api/decisions/')) {
       const idToken = pathname.split('/').at(-1);
-      const decisionId = Number(idToken);
-      if (engine.database && Number.isFinite(decisionId)) {
-        const payload = engine.database.readDecisionById(decisionId);
-        if (payload) {
-          createJsonResponse(res, payload);
-          return;
-        }
-      }
-
       const fallback = (await redisStore?.readDecisions(200))?.find((item) => item.id === idToken) || null;
       createJsonResponse(res, fallback || { error: 'Decision not found' });
       return;
     }
 
     if (pathname === '/api/risk-events' || pathname === '/risk-events') {
-      if (engine.database) {
-        createJsonResponse(res, engine.database.readRiskEvents(100));
-        return;
-      }
       createJsonResponse(res, []);
       return;
     }
