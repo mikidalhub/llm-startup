@@ -29,6 +29,7 @@ test('buildFallbackDecision follows RSI bands', () => {
 
 test('TradingEngine tick writes results and records trade with synthetic fallback', async () => {
   const writes = [];
+  const dbCalls = { decisions: 0, trades: 0, snapshots: 0, portfolioSnapshots: 0, riskEvents: 0 };
   const engine = new TradingEngine(baseConfig, {
     fetchFn: async () => {
       throw new Error('network down');
@@ -36,7 +37,15 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
     writeFileFn: async (path, payload) => {
       writes.push({ path, payload: JSON.parse(payload) });
     },
-    clock: () => '2024-01-01T00:00:00.000Z'
+    clock: () => '2024-01-01T00:00:00.000Z',
+    database: {
+      recordDecision: () => { dbCalls.decisions += 1; },
+      recordTrade: () => { dbCalls.trades += 1; },
+      recordSnapshot: () => { dbCalls.snapshots += 1; },
+      recordPortfolioSnapshot: () => { dbCalls.portfolioSnapshots += 1; },
+      recordRiskEvent: () => { dbCalls.riskEvents += 1; },
+      loadLatestState: () => null
+    }
   });
 
   await engine.tick();
@@ -46,6 +55,38 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
   assert.equal(writes[0].path, './tmp-results.json');
   assert.equal(writes[0].payload.snapshots.AAPL.source, 'synthetic-fallback');
   assert.equal(engine.portfolio.trades.length, 1);
+  assert.equal(dbCalls.decisions, 1);
+  assert.equal(dbCalls.trades, 1);
+  assert.equal(dbCalls.snapshots, 1);
+  assert.equal(dbCalls.portfolioSnapshots, 1);
+});
+
+test('TradingEngine restores durable state on start bootstrap', async () => {
+  const engine = new TradingEngine(baseConfig, {
+    database: {
+      loadLatestState: () => ({
+        portfolio: {
+          cash: 600,
+          positions: { AAPL: { shares: 2, avgCost: 120 } },
+          metrics: { pnl: 10, returnPct: 1, winRate: 0, sharpe: 0.2, portfolioValue: 840 },
+          trades: [{ symbol: 'AAPL', action: 'BUY' }],
+          equityCurve: [{ ts: '2024-01-01T00:00:00.000Z', value: 840 }]
+        },
+        snapshots: { AAPL: { symbol: 'AAPL', price: 120, volume: 10, rsi: 40, ts: '2024-01-01T00:00:00.000Z' } },
+        lastError: null
+      }),
+      recordDecision: () => {},
+      recordTrade: () => {},
+      recordSnapshot: () => {},
+      recordPortfolioSnapshot: () => {},
+      recordRiskEvent: () => {}
+    }
+  });
+
+  await engine.bootstrapFromStorage();
+  assert.equal(engine.portfolio.cash, 600);
+  assert.equal(engine.portfolio.positions.AAPL.shares, 2);
+  assert.equal(engine.snapshots.AAPL.price, 120);
 });
 
 test('TradingEngine executes buy and sell decisions safely', () => {
