@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
+import { API_DOCS } from './api-docs.js';
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -41,6 +42,25 @@ const parseJsonBody = async (req) => {
   }
 };
 
+
+const isIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const createErrorResponse = (res, statusCode, message, details = null) => {
+  applyCorsHeaders(res);
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ error: message, ...(details ? { details } : {}) }));
+};
+
+const normalizeTradeRows = async ({ engine, redisStore, resultsPath }) => {
+  const redisTrades = await redisStore?.readTrades?.(500);
+  if (redisTrades?.length) return redisTrades;
+
+  const results = await readResultsPayload({ resultsPath, redisStore });
+  if (results.trades?.length) return results.trades;
+
+  return engine.getState().portfolio?.trades || [];
+};
+
 const readResultsPayload = async ({ resultsPath, redisStore }) => {
   const fallback = {
     timestamp: new Date().toISOString(),
@@ -67,7 +87,9 @@ const readResultsPayload = async ({ resultsPath, redisStore }) => {
       portfolioValue: parsed.portfolioValue ?? parsed.portfolio?.metrics?.portfolioValue ?? 0,
       positions: parsed.positions ?? parsed.portfolio?.positions ?? {},
       trades: parsed.trades ?? parsed.portfolio?.trades ?? [],
-      signals: parsed.signals ?? []
+      signals: parsed.signals ?? [],
+      operationResults: parsed.operationResults ?? parsed.portfolio?.operationResults ?? [],
+      cumulativeRevenue: parsed.cumulativeRevenue ?? 0
     };
   } catch {
     return fallback;
@@ -234,12 +256,17 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
       return;
     }
 
+    if (pathname === '/api/docs') {
+      createJsonResponse(res, API_DOCS);
+      return;
+    }
+
     if (pathname === '/api/bootstrap') {
       const [results, decisions, events, trades] = await Promise.all([
         readResultsPayload({ resultsPath, redisStore }),
         redisStore?.readDecisions?.(200) ?? [],
         redisStore?.readEvents?.(200) ?? [],
-        redisStore?.readTrades?.(300) ?? []
+        normalizeTradeRows({ engine, redisStore, resultsPath })
       ]);
       createJsonResponse(res, {
         state: engine.getState(),
@@ -263,7 +290,13 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
 
     if (pathname === '/trades' || pathname === '/api/trades') {
       const date = url.searchParams.get('date') || '';
-      const trades = filterByDate(engine.getState().portfolio.trades, date).slice(-200);
+      if (date && !isIsoDate(date)) {
+        createErrorResponse(res, 400, 'Invalid date format. Use YYYY-MM-DD.');
+        return;
+      }
+
+      const rows = await normalizeTradeRows({ engine, redisStore, resultsPath });
+      const trades = filterByDate(rows, date).slice(-200);
       createJsonResponse(res, trades);
       return;
     }
@@ -319,11 +352,23 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
 
         const results = await readResultsPayload({ resultsPath, redisStore });
         const stockSummary = await summarizeStocks({ engine, results, redisStore });
-        const detail = stockSummary.details.find((item) => item.symbol === symbol);
+        let detail = stockSummary.details.find((item) => item.symbol === symbol);
         if (!detail) {
-          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ error: 'Stock not tracked.' }));
-          return;
+          try {
+            const company = await engine.buildCompanyCard(symbol);
+            detail = {
+              symbol,
+              name: company.name,
+              sector: company.sector,
+              currentPrice: company.price,
+              description: company.explanation?.summary || 'Company profile from market data.',
+              totalTrades: 0,
+              position: null
+            };
+          } catch {
+            createErrorResponse(res, 404, 'Stock not tracked and external lookup failed.');
+            return;
+          }
         }
         createJsonResponse(res, detail);
         return;
@@ -379,8 +424,7 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
         return;
       }
     } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      createErrorResponse(res, 500, error instanceof Error ? error.message : String(error));
       return;
     }
 

@@ -6,6 +6,11 @@ symbols:
   - ETH-USD
   - TSLA
 pollIntervalSeconds: 60
+dailySchedule:
+  enabled: true
+  hour: 9
+  minute: 0
+  timezone: UTC
 capital: 10000
 maxPositionPct: 0.1
 rsiPeriod: 14

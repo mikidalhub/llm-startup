@@ -68,6 +68,12 @@ export const loadConfig = async (configPath = 'config.yaml') => {
   return {
     symbols: parsed.symbols ?? ['AAPL'],
     pollIntervalSeconds: Number(parsed.pollIntervalSeconds ?? 60),
+    dailySchedule: {
+      hour: Number(parsed.dailySchedule?.hour ?? 9),
+      minute: Number(parsed.dailySchedule?.minute ?? 0),
+      timezone: parsed.dailySchedule?.timezone ?? process.env.TZ ?? 'UTC',
+      enabled: parsed.dailySchedule?.enabled ?? true
+    },
     capital: Number(parsed.capital ?? 10000),
     maxPositionPct: Number(parsed.maxPositionPct ?? 0.1),
     rsiPeriod: Number(parsed.rsiPeriod ?? 14),
@@ -563,7 +569,9 @@ export class TradingEngine {
 
     const now = new Date();
     const next = new Date(now);
-    next.setHours(9, 0, 0, 0);
+    const hour = clamp(Number(this.config.dailySchedule?.hour ?? 9), 0, 23);
+    const minute = clamp(Number(this.config.dailySchedule?.minute ?? 0), 0, 59);
+    next.setHours(hour, minute, 0, 0);
     if (next <= now) next.setDate(next.getDate() + 1);
 
     const delayMs = Math.max(1000, next.getTime() - now.getTime());
@@ -576,7 +584,7 @@ export class TradingEngine {
   async start() {
     await this.bootstrapFromStorage();
     await this.tick('BOOT');
-    this.scheduleDailyTick();
+    if (this.config.dailySchedule?.enabled !== false) this.scheduleDailyTick();
 
     if (this.config.pollIntervalSeconds > 0) {
       this.timer = setInterval(() => {
@@ -598,7 +606,11 @@ export class TradingEngine {
       portfolio: this.portfolio,
       lastError: this.lastError,
       status: this.status,
-      schedule: { dailyRunAt: '09:00', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }
+      schedule: {
+        dailyRunAt: `${String(this.config.dailySchedule?.hour ?? 9).padStart(2, '0')}:${String(this.config.dailySchedule?.minute ?? 0).padStart(2, '0')}`,
+        timezone: this.config.dailySchedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+        enabled: this.config.dailySchedule?.enabled !== false
+      }
     };
   }
 }

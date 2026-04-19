@@ -59,6 +59,10 @@ test('createServer exposes JSON APIs', async () => {
     assert.equal(healthResponse.status, 200);
     assert.equal(healthResponse.json.status, 'ok');
     assert.equal(healthResponse.json.container, 'running');
+
+    const docsResponse = await requestJson(port, '/api/docs');
+    assert.equal(docsResponse.status, 200);
+    assert.equal(docsResponse.json.openapi, '3.1.0');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -122,6 +126,26 @@ test('createServer accepts process start triggers', async () => {
   }
 });
 
+
+
+test('createServer validates trade date filter format', async () => {
+  const server = createServer({
+    engine: buildMockEngine(),
+    publicDir: new URL('../../public/', import.meta.url)
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/trades?date=20260101`);
+    const payload = await response.json();
+    assert.equal(response.status, 400);
+    assert.match(payload.error, /Invalid date format/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 test('createServer exposes server-sent events stream', async () => {
   const server = createServer({
     engine: {
