@@ -1,17 +1,23 @@
 {
-  "name": "Nimbus Ops Dashboard",
-  "short_name": "Nimbus Ops",
-  "description": "Offline-capable operations dashboard for startup teams.",
+  "name": "Agentic Trading Control Center",
+  "short_name": "Trade Control",
+  "description": "Realtime AI-assisted trading simulation dashboard with transparent decisions and portfolio analytics.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0f14",
-  "theme_color": "#0b0f14",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
   "icons": [
+    {
+      "src": "/icons/trading-favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
     {
       "src": "/icons/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

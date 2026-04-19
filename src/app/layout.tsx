@@ -1,14 +1,33 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import ThemeRegistry from './theme-registry';
 
 export const metadata: Metadata = {
-  title: 'Value-Driven Trading Advisor',
-  description: 'Revolut-style free-tier trading and learning sandbox deployed on GitHub Pages.',
-  manifest: 'manifest.webmanifest'
+  title: 'Agentic Trading Control Center',
+  description: 'Transparent AI-assisted trading simulation platform with realtime decisions, execution telemetry, and portfolio analytics.',
+  applicationName: 'Agentic Trading Control Center',
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [
+      { url: '/icons/trading-favicon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon.svg', type: 'image/svg+xml' }
+    ],
+    shortcut: '/icons/trading-favicon.svg',
+    apple: '/icons/trading-favicon.svg'
+  },
+  openGraph: {
+    title: 'Agentic Trading Control Center',
+    description: 'AI-assisted trading simulator with full decision and execution transparency.',
+    type: 'website'
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Agentic Trading Control Center',
+    description: 'Realtime AI trading observability dashboard and simulation engine.'
+  }
 };
 
-export const viewport = {
-  themeColor: '#e2e8f0'
+export const viewport: Viewport = {
+  themeColor: '#0b1220'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
