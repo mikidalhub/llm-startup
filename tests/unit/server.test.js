@@ -42,9 +42,13 @@ test('createServer exposes JSON APIs', async () => {
     assert.equal(resultsResponse.status, 200);
     assert.deepEqual(resultsResponse.json.trades, []);
 
+    const bootstrapResponse = await requestJson(port, '/api/bootstrap');
+    assert.equal(bootstrapResponse.status, 200);
+    assert.ok(bootstrapResponse.json.state);
+
     const tradesResponse = await requestJson(port, '/trades');
     assert.equal(tradesResponse.status, 200);
-    assert.equal(tradesResponse.json.length, 50);
+    assert.equal(tradesResponse.json.length, 60);
 
     const portfolioResponse = await requestJson(port, '/portfolio');
     assert.equal(portfolioResponse.status, 200);

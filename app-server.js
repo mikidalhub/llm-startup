@@ -74,6 +74,53 @@ const readResultsPayload = async ({ resultsPath, redisStore }) => {
   }
 };
 
+
+const filterByDate = (items, date) => {
+  if (!date) return items;
+  return items.filter((item) => (item.ts || item.timestamp || '').startsWith(date));
+};
+
+const summarizeStocks = async ({ engine, results, redisStore }) => {
+  const state = engine.getState();
+  const symbols = new Set([
+    ...Object.keys(state.snapshots || {}),
+    ...Object.keys(state.portfolio?.positions || {}),
+    ...(results.trades || []).map((trade) => trade.symbol).filter(Boolean)
+  ]);
+  const tracked = [...symbols];
+
+  const details = await Promise.all(tracked.map(async (symbol) => {
+    let company = null;
+    try {
+      company = await engine.buildCompanyCard(symbol);
+    } catch {
+      company = null;
+    }
+
+    const trades = (results.trades || []).filter((trade) => trade.symbol === symbol);
+    const position = state.portfolio?.positions?.[symbol] || null;
+
+    return {
+      symbol,
+      name: company?.name || symbol,
+      sector: company?.sector || 'Unknown',
+      currentPrice: company?.price ?? state.snapshots?.[symbol]?.price ?? null,
+      description: company?.explanation?.summary || 'Tracked by the engine for trading decisions.',
+      totalTrades: trades.length,
+      position
+    };
+  }));
+
+  const events = await redisStore?.readEvents?.(100);
+
+  return {
+    trackedSymbols: tracked,
+    count: tracked.length,
+    details,
+    recentEvents: events || []
+  };
+};
+
 const getSafeAssetPath = (publicPath, requestPath) => {
   const normalizedPath = normalize(requestPath).replace(/^([.]{2}[\\/])+/, '');
   return join(publicPath, normalizedPath);
@@ -187,6 +234,23 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
       return;
     }
 
+    if (pathname === '/api/bootstrap') {
+      const [results, decisions, events, trades] = await Promise.all([
+        readResultsPayload({ resultsPath, redisStore }),
+        redisStore?.readDecisions?.(200) ?? [],
+        redisStore?.readEvents?.(200) ?? [],
+        redisStore?.readTrades?.(300) ?? []
+      ]);
+      createJsonResponse(res, {
+        state: engine.getState(),
+        results,
+        decisions,
+        events,
+        trades
+      });
+      return;
+    }
+
     if (pathname === '/api/state' || pathname === '/state') {
       createJsonResponse(res, engine.getState());
       return;
@@ -198,7 +262,9 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     }
 
     if (pathname === '/trades' || pathname === '/api/trades') {
-      createJsonResponse(res, engine.getState().portfolio.trades.slice(-50));
+      const date = url.searchParams.get('date') || '';
+      const trades = filterByDate(engine.getState().portfolio.trades, date).slice(-200);
+      createJsonResponse(res, trades);
       return;
     }
 
@@ -237,6 +303,32 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     }
 
     try {
+      if (pathname === '/api/stocks' || pathname === '/stocks') {
+        const results = await readResultsPayload({ resultsPath, redisStore });
+        createJsonResponse(res, await summarizeStocks({ engine, results, redisStore }));
+        return;
+      }
+
+      if (pathname.startsWith('/api/stocks/') || pathname.startsWith('/stocks/')) {
+        const symbol = pathname.split('/').pop()?.toUpperCase();
+        if (!symbol) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Missing symbol.' }));
+          return;
+        }
+
+        const results = await readResultsPayload({ resultsPath, redisStore });
+        const stockSummary = await summarizeStocks({ engine, results, redisStore });
+        const detail = stockSummary.details.find((item) => item.symbol === symbol);
+        if (!detail) {
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Stock not tracked.' }));
+          return;
+        }
+        createJsonResponse(res, detail);
+        return;
+      }
+
       if (pathname === '/opportunities' || pathname === '/api/opportunities') {
         createJsonResponse(res, await engine.getOpportunities());
         return;
