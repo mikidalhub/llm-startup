@@ -8,6 +8,7 @@ RUN npm ci --omit=dev
 COPY public ./public
 COPY server.js ./server.js
 COPY app-server.js ./app-server.js
+COPY api-docs.js ./api-docs.js
 COPY redis-store.js ./redis-store.js
 COPY trading-engine.js ./trading-engine.js
 COPY config.yaml ./config.yaml
