@@ -135,6 +135,7 @@ export default function HomePage() {
 
   const metrics = engineState.portfolio?.metrics || {};
   const equityCurve = engineState.portfolio?.equityCurve || [];
+  const now = new Date();
   const todayIso = new Date().toISOString().slice(0, 10);
   const trades = useMemo(() => {
     const source = results.trades || [];
@@ -188,7 +189,7 @@ export default function HomePage() {
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ maxWidth: { md: 240 } }}>
             <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>Current date</Typography>
-            <Typography sx={{ fontSize: 20, fontWeight: 500 }}>{new Date().toLocaleDateString()}</Typography>
+            <DateBadge date={now} />
             <Typography sx={{ fontSize: 11, color: '#64748b' }}>Daily schedule: 9:00 AM</Typography>
           </GlassPanel>
           <MetricCard title="Portfolio Value" value={formatUsd(metrics.portfolioValue || 0)} subtitle="Live equity" />
@@ -398,6 +399,35 @@ function Row({ label, value }: { label: string; value: string }) {
       <Typography sx={{ fontSize: 11.5, color: '#94a3b8' }}>{label}</Typography>
       <Typography sx={{ fontSize: 12.3, textAlign: 'right', ml: 1 }}>{value}</Typography>
     </Stack>
+  );
+}
+
+function DateBadge({ date }: { date: Date }) {
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+  const day = date.getDate();
+  const monthYear = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
+
+  return (
+    <Box
+      sx={{
+        width: 86,
+        borderRadius: 1,
+        overflow: 'hidden',
+        border: '1px solid rgba(148,163,184,0.3)',
+        boxShadow: '0 6px 18px rgba(15,23,42,0.28)',
+        my: 0.6
+      }}
+    >
+      <Box sx={{ bgcolor: '#dbeafe', color: '#1e3a8a', px: 1, py: 0.35 }}>
+        <Typography sx={{ fontSize: 10, letterSpacing: '0.08em', fontWeight: 700, textAlign: 'center' }}>{weekday}</Typography>
+      </Box>
+      <Box sx={{ bgcolor: '#bfdbfe', color: '#1d4ed8', px: 1, py: 0.6 }}>
+        <Typography sx={{ fontSize: 46, lineHeight: 0.9, fontWeight: 800, textAlign: 'center' }}>{day}</Typography>
+      </Box>
+      <Box sx={{ bgcolor: '#dbeafe', color: '#1e40af', px: 1, py: 0.4 }}>
+        <Typography sx={{ fontSize: 12, letterSpacing: '0.04em', fontWeight: 700, textAlign: 'center' }}>{monthYear}</Typography>
+      </Box>
+    </Box>
   );
 }
 
