@@ -47,7 +47,13 @@ type ProcessEvent = {
 
 type Trade = { ts?: string; symbol: string; action: string; price: number; reason?: string; status?: string; shares?: number };
 type Decision = { id?: number | string; ts?: string; symbol?: string; action?: string; sizePct?: number; reason?: string; source?: string; trade?: Trade | null };
-type ResultsPayload = { trades?: Trade[]; signals?: Array<{ timestamp?: string; symbol: string; signal: string; rsi: number; price: number }> };
+type OperationResult = { id: string; ts?: string; symbol: string; action: string; status?: string; signedValue?: number; grossValue?: number; shares?: number; price?: number };
+type ResultsPayload = {
+  trades?: Trade[];
+  signals?: Array<{ timestamp?: string; symbol: string; signal: string; rsi: number; price: number }>;
+  operationResults?: OperationResult[];
+  cumulativeRevenue?: number;
+};
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -68,10 +74,22 @@ export default function HomePage() {
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showPipeline, setShowPipeline] = useState(false);
+  const [filterDate, setFilterDate] = useState('');
+  const [isTriggering, setIsTriggering] = useState(false);
 
   useEffect(() => {
     const hydrate = async () => {
       try {
+        const bootstrapRes = await fetch(`${API_BASE}/api/bootstrap`);
+        if (bootstrapRes.ok) {
+          const bootstrap = await bootstrapRes.json();
+          if (bootstrap.state) setEngineState(bootstrap.state);
+          if (bootstrap.results) setResults(bootstrap.results);
+          if (bootstrap.decisions) setDecisions(bootstrap.decisions);
+          if (bootstrap.events) setEvents(bootstrap.events);
+          return;
+        }
+
         const [stateRes, resultsRes, decisionsRes] = await Promise.all([
           fetch(`${API_BASE}/api/state`),
           fetch(`${API_BASE}/api/results`),
@@ -117,14 +135,24 @@ export default function HomePage() {
 
   const metrics = engineState.portfolio?.metrics || {};
   const equityCurve = engineState.portfolio?.equityCurve || [];
-  const trades = (results.trades || []).slice(-16).reverse();
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const trades = useMemo(() => {
+    const source = results.trades || [];
+    const filtered = filterDate ? source.filter((trade) => (trade.ts || '').startsWith(filterDate)) : source;
+    return filtered.slice(-16).reverse();
+  }, [filterDate, results.trades]);
+  const operationResults = useMemo(() => {
+    const source = results.operationResults || [];
+    return filterDate ? source.filter((item) => (item.ts || '').startsWith(filterDate)) : source;
+  }, [filterDate, results.operationResults]);
   const dailyChange = equityCurve.length > 1 ? equityCurve.at(-1)!.value - equityCurve.at(-2)!.value : 0;
   const netProfit = metrics.pnl || 0;
   const revenue = useMemo(() => {
+    if (typeof results.cumulativeRevenue === 'number') return results.cumulativeRevenue;
     return (results.trades || [])
       .filter((trade) => trade.status === 'FILLED')
       .reduce((sum, trade) => sum + ((trade.action === 'SELL' ? 1 : -1) * ((trade.shares || 0) * trade.price)), 0);
-  }, [results.trades]);
+  }, [results.cumulativeRevenue, results.trades]);
 
   const selectedDecision = useMemo(() => {
     if (!selectedTrade) return null;
@@ -138,17 +166,63 @@ export default function HomePage() {
       .slice(-4);
   }, [results.trades, selectedTrade]);
 
+
+  const triggerManualRun = async () => {
+    setIsTriggering(true);
+    try {
+      await fetch(`${API_BASE}/api/process/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'MANUAL_UI' })
+      });
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#030508', color: '#e2e8f0', p: 2.4 }}>
       <Stack spacing={1.8} sx={{ mr: { md: '360px', xs: 0 } }}>
         <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: '#7c8ca3' }}>AI MULTI-AGENT TRADING</Typography>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
+          <GlassPanel sx={{ maxWidth: { md: 240 } }}>
+            <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>Current date</Typography>
+            <Typography sx={{ fontSize: 20, fontWeight: 500 }}>{new Date().toLocaleDateString()}</Typography>
+            <Typography sx={{ fontSize: 11, color: '#64748b' }}>Daily schedule: 9:00 AM</Typography>
+          </GlassPanel>
           <MetricCard title="Portfolio Value" value={formatUsd(metrics.portfolioValue || 0)} subtitle="Live equity" />
           <MetricCard title="Net Profit" value={formatUsd(netProfit)} subtitle="After costs" positive={netProfit >= 0} />
           <MetricCard title="Daily Change" value={formatUsd(dailyChange)} subtitle="Last step delta" positive={dailyChange >= 0} />
           <MetricCard title="Revenue" value={formatUsd(revenue)} subtitle="From actions" positive={revenue >= 0} />
         </Stack>
+
+        <GlassPanel>
+          <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Per-operation results</Typography>
+          <Stack spacing={0.6} sx={{ maxHeight: 180, overflowY: 'auto' }}>
+            {operationResults.slice(-25).reverse().map((item) => (
+              <Stack key={item.id} direction='row' justifyContent='space-between' sx={{ p: 0.7, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
+                <Typography sx={{ fontSize: 12 }}>{item.symbol} · {item.action}</Typography>
+                <Typography sx={{ fontSize: 12, color: (item.signedValue || 0) >= 0 ? '#86efac' : '#fca5a5' }}>{formatUsd(item.signedValue || 0)}</Typography>
+              </Stack>
+            ))}
+            {!operationResults.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No operation results for selected date.</Typography> : null}
+          </Stack>
+        </GlassPanel>
+
+        <GlassPanel>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} justifyContent='space-between'>
+            <Stack direction='row' spacing={1} alignItems='center'>
+              <Button variant='contained' size='small' disabled={isTriggering} onClick={() => void triggerManualRun()}>
+                {isTriggering ? 'Starting...' : 'Run trading now'}
+              </Button>
+              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Filter by date</Typography>
+              <input type='date' value={filterDate} max={todayIso} onChange={(event) => setFilterDate(event.target.value)} style={{ background: '#0f172a', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.3)', borderRadius: 6, padding: '4px 8px' }} />
+              <Button size='small' onClick={() => setFilterDate('')}>Clear</Button>
+            </Stack>
+            <Typography sx={{ fontSize: 12, color: '#64748b' }}>Loaded items: {trades.length} trades · {events.length} logs</Typography>
+          </Stack>
+        </GlassPanel>
 
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ flex: 1, minHeight: 250 }}>

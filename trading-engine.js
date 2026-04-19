@@ -68,6 +68,12 @@ export const loadConfig = async (configPath = 'config.yaml') => {
   return {
     symbols: parsed.symbols ?? ['AAPL'],
     pollIntervalSeconds: Number(parsed.pollIntervalSeconds ?? 60),
+    dailySchedule: {
+      hour: Number(parsed.dailySchedule?.hour ?? 9),
+      minute: Number(parsed.dailySchedule?.minute ?? 0),
+      timezone: parsed.dailySchedule?.timezone ?? process.env.TZ ?? 'UTC',
+      enabled: parsed.dailySchedule?.enabled ?? true
+    },
     capital: Number(parsed.capital ?? 10000),
     maxPositionPct: Number(parsed.maxPositionPct ?? 0.1),
     rsiPeriod: Number(parsed.rsiPeriod ?? 14),
@@ -94,12 +100,14 @@ export class TradingEngine {
       positions: {},
       trades: [],
       equityCurve: [{ ts: this.clock(), value: config.capital }],
-      metrics: { pnl: 0, returnPct: 0, winRate: 0, sharpe: 0 }
+      metrics: { pnl: 0, returnPct: 0, winRate: 0, sharpe: 0 },
+      operationResults: []
     };
     this.snapshots = {};
     this.quoteCache = new Map();
     this.lastError = null;
     this.timer = null;
+    this.dailyTimer = null;
     this.listeners = new Set();
     this.eventListeners = new Set();
     this.isTicking = false;
@@ -123,6 +131,7 @@ export class TradingEngine {
 
   emitEvent(type, payload = {}) {
     const event = { timestamp: new Date().toISOString(), type, ...payload };
+    void this.redisStore?.appendEvent?.(event);
     for (const listener of this.eventListeners) listener(event);
   }
 
@@ -202,6 +211,22 @@ export class TradingEngine {
     this.portfolio.trades.push(trade);
     if (this.portfolio.trades.length > 300) this.portfolio.trades = this.portfolio.trades.slice(-300);
     return trade;
+  }
+
+  computeOperationResult(trade, snapshot) {
+    const grossValue = Number(((trade.shares || 0) * snapshot.price).toFixed(2));
+    const signedValue = Number(((trade.action === 'SELL' ? 1 : trade.action === 'BUY' ? -1 : 0) * grossValue).toFixed(2));
+    return {
+      id: `${trade.symbol}-${trade.ts}-${trade.action}`,
+      ts: trade.ts,
+      symbol: trade.symbol,
+      action: trade.action,
+      status: trade.status,
+      price: trade.price,
+      shares: trade.shares,
+      grossValue,
+      signedValue
+    };
   }
 
   getPortfolioValue() {
@@ -444,6 +469,8 @@ export class TradingEngine {
       config: this.config,
       snapshots: this.snapshots,
       portfolio: this.portfolio,
+      operationResults: this.portfolio.operationResults || [],
+      cumulativeRevenue: this.portfolio.operationResults?.reduce((sum, item) => sum + (item.signedValue || 0), 0) || 0,
       lastError: this.lastError
     };
 
@@ -465,7 +492,8 @@ export class TradingEngine {
       ...restoredPortfolio,
       trades: restoredPortfolio.trades ?? this.portfolio.trades,
       equityCurve: restoredPortfolio.equityCurve?.length ? restoredPortfolio.equityCurve : this.portfolio.equityCurve,
-      metrics: restoredPortfolio.metrics ?? this.portfolio.metrics
+      metrics: restoredPortfolio.metrics ?? this.portfolio.metrics,
+      operationResults: restoredPortfolio.operationResults ?? restored.operationResults ?? this.portfolio.operationResults
     };
     this.snapshots = restored.snapshots ?? {};
     this.lastError = restored.lastError;
@@ -517,8 +545,11 @@ export class TradingEngine {
         const trade = this.executeTrade(symbol, snapshot, decision, decisionTimestamp);
 
         await this.redisStore?.appendTrade(trade);
+        const operationResult = this.computeOperationResult(trade, snapshot);
+        this.portfolio.operationResults.push(operationResult);
+        if (this.portfolio.operationResults.length > 1000) this.portfolio.operationResults = this.portfolio.operationResults.slice(-1000);
 
-        this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price });
+        this.emitEvent('trade-processed', { symbol, action: decision.action, price: snapshot.price, operationResult });
       }
 
       this.lastError = errors.length ? errors.join(' | ') : null;
@@ -533,16 +564,38 @@ export class TradingEngine {
     }
   }
 
+  scheduleDailyTick() {
+    if (this.dailyTimer) clearTimeout(this.dailyTimer);
+
+    const now = new Date();
+    const next = new Date(now);
+    const hour = clamp(Number(this.config.dailySchedule?.hour ?? 9), 0, 23);
+    const minute = clamp(Number(this.config.dailySchedule?.minute ?? 0), 0, 59);
+    next.setHours(hour, minute, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+
+    const delayMs = Math.max(1000, next.getTime() - now.getTime());
+    this.dailyTimer = setTimeout(async () => {
+      await this.tick('DAILY_0900');
+      this.scheduleDailyTick();
+    }, delayMs);
+  }
+
   async start() {
     await this.bootstrapFromStorage();
     await this.tick('BOOT');
-    this.timer = setInterval(() => {
-      void this.tick('SCHEDULED');
-    }, this.config.pollIntervalSeconds * 1000);
+    if (this.config.dailySchedule?.enabled !== false) this.scheduleDailyTick();
+
+    if (this.config.pollIntervalSeconds > 0) {
+      this.timer = setInterval(() => {
+        void this.tick('SCHEDULED');
+      }, this.config.pollIntervalSeconds * 1000);
+    }
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
+    if (this.dailyTimer) clearTimeout(this.dailyTimer);
   }
 
   getState() {
@@ -552,7 +605,12 @@ export class TradingEngine {
       snapshots: this.snapshots,
       portfolio: this.portfolio,
       lastError: this.lastError,
-      status: this.status
+      status: this.status,
+      schedule: {
+        dailyRunAt: `${String(this.config.dailySchedule?.hour ?? 9).padStart(2, '0')}:${String(this.config.dailySchedule?.minute ?? 0).padStart(2, '0')}`,
+        timezone: this.config.dailySchedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+        enabled: this.config.dailySchedule?.enabled !== false
+      }
     };
   }
 }

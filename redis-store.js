@@ -64,6 +64,12 @@ export class RedisStore {
     await this.client.lTrim(this.key('trades'), 0, 499);
   }
 
+  async appendEvent(event) {
+    if (!this.connected) return;
+    await this.client.lPush(this.key('events'), JSON.stringify(event));
+    await this.client.lTrim(this.key('events'), 0, 799);
+  }
+
   async readResultsPayload() {
     if (!this.connected) return null;
     const raw = await this.client.get(this.key('results'));
@@ -84,4 +90,23 @@ export class RedisStore {
       .filter(Boolean)
       .reverse();
   }
+
+  async readTrades(limit = 200) {
+    if (!this.connected) return [];
+    const rows = await this.client.lRange(this.key('trades'), 0, Math.max(0, limit - 1));
+    return rows
+      .map((row) => safeParse(row, null))
+      .filter(Boolean)
+      .reverse();
+  }
+
+  async readEvents(limit = 200) {
+    if (!this.connected) return [];
+    const rows = await this.client.lRange(this.key('events'), 0, Math.max(0, limit - 1));
+    return rows
+      .map((row) => safeParse(row, null))
+      .filter(Boolean)
+      .reverse();
+  }
 }
+
