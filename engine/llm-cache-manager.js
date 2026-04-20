@@ -43,7 +43,10 @@ export class LlmCacheManager {
   async get(key) {
     const now = this.clock();
     const cached = this.memory.get(key);
-    if (cached && cached.expiresAt > now) return { ...cached, layer: 'memory' };
+    if (cached) {
+      if (cached.expiresAt > now) return { ...cached, layer: 'memory' };
+      if (cached.expiresAt <= now) this.memory.delete(key);
+    }
 
     const redisEntry = await this.redisStore?.getJson?.(key, null);
     if (redisEntry?.expiresAt > now) {
