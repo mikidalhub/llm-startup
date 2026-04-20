@@ -40,36 +40,51 @@ export class LlmCacheManager {
     return `${this.namespace}:${digest}`;
   }
 
+  isLiveEntry(entry, now) {
+    return Number.isFinite(entry?.expiresAt) && entry.expiresAt > now;
+  }
+
+  isExpiredEntry(entry, now) {
+    return Number.isFinite(entry?.expiresAt) && entry.expiresAt <= now;
+  }
+
   async get(key) {
     const now = this.clock();
     const cached = this.memory.get(key);
     if (cached) {
-      if (cached.expiresAt > now) return { ...cached, layer: 'memory' };
-      if (cached.expiresAt <= now) this.memory.delete(key);
+      if (this.isLiveEntry(cached, now)) return { ...cached, layer: 'memory' };
+      this.memory.delete(key);
     }
 
     const redisEntry = await this.redisStore?.getJson?.(key, null);
-    if (redisEntry?.expiresAt > now) {
+    if (this.isLiveEntry(redisEntry, now)) {
       this.memory.set(key, redisEntry);
       return { ...redisEntry, layer: 'redis' };
     }
+    if (redisEntry && this.isExpiredEntry(redisEntry, now)) {
+      await this.redisStore?.deleteJson?.(key);
+    }
 
     const coldEntry = await this.readColdEntry(key);
-    if (coldEntry?.expiresAt > now) {
+    if (this.isLiveEntry(coldEntry, now)) {
       this.memory.set(key, coldEntry);
       await this.redisStore?.setJson?.(key, coldEntry, Math.ceil((coldEntry.expiresAt - now) / 1000));
       return { ...coldEntry, layer: 'cold' };
+    }
+    if (coldEntry && this.isExpiredEntry(coldEntry, now)) {
+      await this.deleteColdEntry(key);
     }
 
     return null;
   }
 
   async set(key, value, metadata = {}) {
+    const createdAt = this.clock();
     const entry = {
       value,
       metadata,
-      createdAt: this.clock(),
-      expiresAt: this.clock() + this.ttlMs
+      createdAt,
+      expiresAt: createdAt + this.ttlMs
     };
     this.memory.set(key, entry);
     await this.redisStore?.setJson?.(key, entry, Math.ceil(this.ttlMs / 1000));
@@ -148,6 +163,18 @@ export class LlmCacheManager {
       const file = safeParse(await readFile(this.coldStoragePath, 'utf-8'), {});
       const next = { ...file, entries: { ...(file.entries || {}), [key]: entry } };
       await writeFile(this.coldStoragePath, JSON.stringify(next, null, 2), 'utf-8');
+    } catch {
+      // best effort cold-storage fallback
+    }
+  }
+
+  async deleteColdEntry(key) {
+    try {
+      const file = safeParse(await readFile(this.coldStoragePath, 'utf-8'), {});
+      if (!file.entries?.[key]) return;
+      const nextEntries = { ...(file.entries || {}) };
+      delete nextEntries[key];
+      await writeFile(this.coldStoragePath, JSON.stringify({ ...file, entries: nextEntries }, null, 2), 'utf-8');
     } catch {
       // best effort cold-storage fallback
     }

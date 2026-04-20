@@ -126,4 +126,10 @@ export class RedisStore {
     const raw = await this.client.get(this.key(suffix));
     return safeParse(raw, fallback);
   }
+
+  async deleteJson(suffix) {
+    if (!this.connected) return false;
+    await this.client.del(this.key(suffix));
+    return true;
+  }
 }
