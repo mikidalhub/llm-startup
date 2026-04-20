@@ -13,10 +13,15 @@ COPY redis-store.js ./redis-store.js
 COPY trading-engine.js ./trading-engine.js
 COPY config.yaml ./config.yaml
 COPY analysis ./analysis
+COPY agents ./agents
 COPY data ./data
 COPY dividends ./dividends
+COPY engine ./engine
+COPY events ./events
 COPY explainer ./explainer
 COPY fundamentals ./fundamentals
+COPY graph ./graph
+COPY nodes ./nodes
 COPY portfolio ./portfolio
 COPY risk ./risk
 COPY scanner ./scanner
