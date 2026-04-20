@@ -7,6 +7,9 @@ import {
   Chip,
   Collapse,
   Divider,
+  Dialog,
+  DialogContent,
+  DialogTitle,
   Drawer,
   LinearProgress,
   Stack,
@@ -58,6 +61,15 @@ type ResultsPayload = {
   operationResults?: OperationResult[];
   cumulativeRevenue?: number;
 };
+type WorkflowStep = {
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  behindScenes: string;
+  dataHint: string;
+  status: string;
+};
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -81,6 +93,9 @@ export default function HomePage() {
   const [filterDate, setFilterDate] = useState('');
   const [isTriggering, setIsTriggering] = useState(false);
   const [llmStreamText, setLlmStreamText] = useState('');
+  const [displayedEvents, setDisplayedEvents] = useState<ProcessEvent[]>([]);
+  const [tradeLimit, setTradeLimit] = useState(6);
+  const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
 
   useEffect(() => {
     const hydrate = async () => {
@@ -145,6 +160,21 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    setDisplayedEvents([]);
+  }, [filterDate]);
+
+  useEffect(() => {
+    if (!events.length) return;
+    const timer = setInterval(() => {
+      setDisplayedEvents((prev) => {
+        if (prev.length >= events.length) return prev;
+        return [...prev, events[prev.length]].slice(-60);
+      });
+    }, 700);
+    return () => clearInterval(timer);
+  }, [events]);
+
   const metrics = engineState.portfolio?.metrics || {};
   const equityCurve = engineState.portfolio?.equityCurve || [];
   const now = new Date();
@@ -154,10 +184,6 @@ export default function HomePage() {
     const filtered = filterDate ? source.filter((trade) => (trade.ts || '').startsWith(filterDate)) : source;
     return filtered.slice(-16).reverse();
   }, [filterDate, results.trades]);
-  const operationResults = useMemo(() => {
-    const source = results.operationResults || [];
-    return filterDate ? source.filter((item) => (item.ts || '').startsWith(filterDate)) : source;
-  }, [filterDate, results.operationResults]);
   const dailyChange = equityCurve.length > 1 ? equityCurve.at(-1)!.value - equityCurve.at(-2)!.value : 0;
   const netProfit = metrics.pnl || 0;
   const revenue = useMemo(() => {
@@ -197,6 +223,37 @@ export default function HomePage() {
     [events]
   );
   const latestPipelineEvents = useMemo(() => events.slice(-22).reverse(), [events]);
+  const activePhase = useMemo(() => graphNodes.find((node) => ['processing', 'start'].includes(graphStatus[node])) || 'IDLE', [graphNodes, graphStatus]);
+  const workflowSteps = useMemo(
+    () =>
+      graphNodes.map((node) => ({
+        id: node,
+        title: node.replace('_', ' '),
+        subtitle:
+          node === 'DATA' ? 'Collecting market snapshots' :
+            node === 'AGGREGATOR' ? 'Combining multi-agent reasoning' :
+              node === 'EXECUTION' ? 'Sending or simulating orders' : 'Evaluating this phase',
+        description:
+          node === 'DATA' ? 'The system fetches latest prices, indicators, and internal state for the decision cycle.' :
+            node === 'TECHNICAL_AGENT' ? 'Technical agent evaluates trends, momentum, and chart signals.' :
+              node === 'FUNDAMENTAL_AGENT' ? 'Fundamental agent checks business quality, valuation, and profitability context.' :
+                node === 'SENTIMENT_AGENT' ? 'Sentiment agent reads qualitative signals from commentary and narrative.' :
+                  node === 'AGGREGATOR' ? 'The LLM aggregator reconciles all opinions into one proposed trade action.' :
+                    node === 'RISK' ? 'Risk module validates guardrails, exposure limits, and allowed sizing.' :
+                      'Execution node records and applies the final approved action.',
+        behindScenes:
+          node === 'AGGREGATOR' ? 'Streaming tokens are generated and normalized into a structured decision payload.' :
+            node === 'RISK' ? 'Rule engine can approve, reject, or modify the action before it reaches execution.' :
+              'Each step emits process events used by the live dashboard and event history.',
+        dataHint:
+          node === 'AGGREGATOR' ? (llmStreamText.slice(-180) || 'Awaiting reasoning tokens from LLM stream.') :
+            node === 'RISK' ? String((latestRiskEvent?.payload?.reason as string) || latestRiskEvent?.type || 'No recent risk event.') :
+              node === 'EXECUTION' ? String((latestExecutionEvent?.payload?.status as string) || 'No recent execution payload.') :
+                `Current state: ${graphStatus[node] || 'idle'}`,
+        status: graphStatus[node] || 'idle'
+      })),
+    [graphNodes, graphStatus, latestExecutionEvent?.payload?.status, latestRiskEvent?.payload?.reason, latestRiskEvent?.type, llmStreamText]
+  );
 
 
   const triggerManualRun = async () => {
@@ -233,16 +290,20 @@ export default function HomePage() {
         </Stack>
 
         <GlassPanel>
-          <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Per-operation results</Typography>
-          <Stack spacing={0.6} sx={{ maxHeight: 180, overflowY: 'auto' }}>
-            {operationResults.slice(-25).reverse().map((item) => (
-              <Stack key={item.id} direction='row' justifyContent='space-between' sx={{ p: 0.7, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
-                <Typography sx={{ fontSize: 12 }}>{item.symbol} · {item.action}</Typography>
-                <Typography sx={{ fontSize: 12, color: (item.signedValue || 0) >= 0 ? '#86efac' : '#fca5a5' }}>{formatUsd(item.signedValue || 0)}</Typography>
-              </Stack>
-            ))}
-            {!operationResults.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No operation results for selected date.</Typography> : null}
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ md: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Bootstrap request</Typography>
+              <Typography sx={{ fontSize: 12, color: '#cbd5e1' }}>
+                Initial load that asks the backend for state + decisions + events so beginners see one complete picture.
+              </Typography>
+            </Box>
+            <Tooltip title="A bootstrap request is the app's first all-in-one data fetch used to hydrate the dashboard quickly.">
+              <Chip size="small" label="What is this?" sx={{ ...badgeSx, cursor: 'help' }} />
+            </Tooltip>
           </Stack>
+          <Typography sx={{ mt: 0.8, fontSize: 11, color: '#64748b' }}>
+            Dynamic date and live stream are generated in real time from client clock + server events.
+          </Typography>
         </GlassPanel>
 
         <GlassPanel>
@@ -255,7 +316,7 @@ export default function HomePage() {
               <input type='date' value={filterDate} max={todayIso} onChange={(event) => setFilterDate(event.target.value)} style={{ background: '#0f172a', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.3)', borderRadius: 6, padding: '4px 8px' }} />
               <Button size='small' onClick={() => setFilterDate('')}>Clear</Button>
             </Stack>
-            <Typography sx={{ fontSize: 12, color: '#64748b' }}>Loaded items: {trades.length} trades · {events.length} logs</Typography>
+            <Typography sx={{ fontSize: 12, color: '#64748b' }}>Loaded items: {trades.length} trades · {events.length} logs · Active phase: {activePhase}</Typography>
           </Stack>
         </GlassPanel>
 
@@ -265,6 +326,8 @@ export default function HomePage() {
           latestRiskEvent={latestRiskEvent}
           latestExecutionEvent={latestExecutionEvent}
           events={latestPipelineEvents}
+          steps={workflowSteps}
+          onStepClick={setSelectedStep}
         />
 
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
@@ -274,9 +337,12 @@ export default function HomePage() {
           </GlassPanel>
 
           <GlassPanel sx={{ flex: 1 }}>
-            <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Recent trades</Typography>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Recent trades</Typography>
+              <Button href="/trades" size="small">View full history</Button>
+            </Stack>
             <Stack spacing={0.7}>
-              {trades.map((trade, index) => (
+              {trades.slice(0, tradeLimit).map((trade, index) => (
                 <Box
                   key={`${trade.ts || index}-${trade.symbol}`}
                   onClick={() => setSelectedTrade(trade)}
@@ -296,6 +362,7 @@ export default function HomePage() {
                 </Box>
               ))}
               {!trades.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No trades yet.</Typography> : null}
+              {tradeLimit < trades.length ? <Button size="small" onClick={() => setTradeLimit((prev) => prev + 6)}>Load more</Button> : null}
             </Stack>
           </GlassPanel>
         </Stack>
@@ -417,11 +484,14 @@ export default function HomePage() {
         </Box>
 
         <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
-        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live process log</Typography>
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live process log (structured)</Typography>
         <Stack spacing={0.7} sx={{ maxHeight: '38vh', overflowY: 'auto' }}>
-          {events.slice(-18).reverse().map((event, index) => (
+          {displayedEvents.slice(-18).reverse().map((event, index) => (
             <Box key={`${event.timestamp || index}-${event.type || 'event'}`} sx={{ p: 0.9, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
-              <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}{event.node ? ` · ${event.node}` : ''}</Typography>
+              <Stack direction="row" spacing={0.8} alignItems="center">
+                <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}{event.node ? ` · ${event.node}` : ''}</Typography>
+                <Chip size="small" label={resolveSeverity(event)} sx={{ height: 18, fontSize: 10, color: '#dbeafe', bgcolor: alpha(resolveSeverityColor(event), 0.25) }} />
+              </Stack>
               <Typography sx={{ fontSize: 12 }}>{event.symbol ? `${event.symbol} · ` : ''}{event.reason || event.action || (event.status ? `status: ${event.status}` : 'state update')}</Typography>
             </Box>
           ))}
@@ -433,6 +503,14 @@ export default function HomePage() {
           </Button>
         ) : null}
       </Drawer>
+      <Dialog open={Boolean(selectedStep)} onClose={() => setSelectedStep(null)} fullWidth maxWidth="sm">
+        <DialogTitle>{selectedStep?.title || 'Workflow step'}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1.1, color: '#334155' }}>{selectedStep?.description}</Typography>
+          <Typography sx={{ fontSize: 13, mb: 1 }}><strong>Behind the scenes:</strong> {selectedStep?.behindScenes}</Typography>
+          <Typography sx={{ fontSize: 13 }}><strong>Live data:</strong> {selectedStep?.dataHint}</Typography>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
@@ -479,13 +557,17 @@ function TradingPipelineGraph({
   llmStreamText,
   latestRiskEvent,
   latestExecutionEvent,
-  events
+  events,
+  steps,
+  onStepClick
 }: {
   graphStatus: Record<string, string>;
   llmStreamText: string;
   latestRiskEvent: ProcessEvent | undefined;
   latestExecutionEvent: ProcessEvent | undefined;
   events: ProcessEvent[];
+  steps: WorkflowStep[];
+  onStepClick: (step: WorkflowStep) => void;
 }) {
   const nodeTone: Record<string, string> = {
     DATA: '#38bdf8',
@@ -505,6 +587,13 @@ function TradingPipelineGraph({
   return (
     <GlassPanel sx={{ p: 1.5 }}>
       <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Real-time AI decision workflow</Typography>
+      <Stack direction="row" spacing={0.7} sx={{ mb: 1.1, overflowX: 'auto' }}>
+        {steps.map((step, idx) => (
+          <Button key={step.id} size="small" onClick={() => onStepClick(step)} sx={{ minWidth: 0, px: 1, border: `1px solid ${alpha(step.status === 'processing' ? '#22c55e' : '#64748b', 0.45)}` }}>
+            {idx + 1}. {step.title}
+          </Button>
+        ))}
+      </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 240px 170px 170px' }, gap: 1, alignItems: 'center' }}>
         <PipelineNode title="DATA COLLECTION" subtitle="Fetching Market Data..." state={nodeState('DATA')} tone={nodeTone.DATA} />
         <Box sx={{ display: 'grid', gap: 0.8 }}>
@@ -547,6 +636,19 @@ function TradingPipelineGraph({
       </Box>
     </GlassPanel>
   );
+}
+
+function resolveSeverity(event: ProcessEvent) {
+  if (event.errors || event.type?.includes('REJECTED')) return 'HIGH';
+  if (event.type?.includes('RISK') || event.status === 'PROCESSING') return 'MEDIUM';
+  return 'INFO';
+}
+
+function resolveSeverityColor(event: ProcessEvent) {
+  const severity = resolveSeverity(event);
+  if (severity === 'HIGH') return '#ef4444';
+  if (severity === 'MEDIUM') return '#f59e0b';
+  return '#38bdf8';
 }
 
 function PipelineNode({
