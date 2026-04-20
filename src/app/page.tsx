@@ -14,6 +14,7 @@ import {
   Typography,
   alpha
 } from '@mui/material';
+import { keyframes } from '@mui/system';
 
 type EngineState = {
   snapshots?: Record<string, { symbol: string; price: number; rsi: number; ts: string }>;
@@ -195,6 +196,7 @@ export default function HomePage() {
     () => [...events].reverse().find((item) => item.type === 'EXECUTION_RESULT'),
     [events]
   );
+  const latestPipelineEvents = useMemo(() => events.slice(-22).reverse(), [events]);
 
 
   const triggerManualRun = async () => {
@@ -213,7 +215,10 @@ export default function HomePage() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#030508', color: '#e2e8f0', p: 2.4 }}>
       <Stack spacing={1.8} sx={{ mr: { md: '360px', xs: 0 } }}>
-        <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: '#7c8ca3' }}>AI MULTI-AGENT TRADING</Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: '#7c8ca3' }}>AI MULTI-AGENT TRADING</Typography>
+          <LiveProcessingIndicator isLive={Boolean(engineState.status?.running)} />
+        </Stack>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ maxWidth: { md: 240 } }}>
@@ -253,6 +258,14 @@ export default function HomePage() {
             <Typography sx={{ fontSize: 12, color: '#64748b' }}>Loaded items: {trades.length} trades · {events.length} logs</Typography>
           </Stack>
         </GlassPanel>
+
+        <TradingPipelineGraph
+          graphStatus={graphStatus}
+          llmStreamText={llmStreamText}
+          latestRiskEvent={latestRiskEvent}
+          latestExecutionEvent={latestExecutionEvent}
+          events={latestPipelineEvents}
+        />
 
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ flex: 1, minHeight: 250 }}>
@@ -431,6 +444,147 @@ function MetricCard({ title, value, subtitle, positive }: { title: string; value
       <Typography sx={{ fontSize: 24, fontWeight: 300, color: positive == null ? '#e2e8f0' : positive ? '#86efac' : '#fca5a5' }}>{value}</Typography>
       <Typography sx={{ fontSize: 11.5, color: '#64748b' }}>{subtitle}</Typography>
     </GlassPanel>
+  );
+}
+
+const pulseDot = keyframes`
+  0% { transform: scale(0.9); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.5; }
+`;
+
+const flowAnim = keyframes`
+  0% { background-position: 0 0; opacity: 0.45; }
+  50% { opacity: 1; }
+  100% { background-position: 160px 0; opacity: 0.45; }
+`;
+
+const thinkAnim = keyframes`
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+`;
+
+function LiveProcessingIndicator({ isLive }: { isLive: boolean }) {
+  return (
+    <Stack direction="row" spacing={0.8} alignItems="center" sx={{ px: 1, py: 0.5, borderRadius: 1.2, border: `1px solid ${alpha('#ef4444', 0.45)}`, bgcolor: alpha('#450a0a', 0.26) }}>
+      <Typography sx={{ fontSize: 11, letterSpacing: '0.08em', color: '#fca5a5' }}>LIVE PROCESSING</Typography>
+      <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: '#ef4444', boxShadow: '0 0 14px rgba(239,68,68,0.75)', animation: `${pulseDot} 1.3s ease-in-out infinite`, opacity: isLive ? 1 : 0.45 }} />
+    </Stack>
+  );
+}
+
+function TradingPipelineGraph({
+  graphStatus,
+  llmStreamText,
+  latestRiskEvent,
+  latestExecutionEvent,
+  events
+}: {
+  graphStatus: Record<string, string>;
+  llmStreamText: string;
+  latestRiskEvent: ProcessEvent | undefined;
+  latestExecutionEvent: ProcessEvent | undefined;
+  events: ProcessEvent[];
+}) {
+  const nodeTone: Record<string, string> = {
+    DATA: '#38bdf8',
+    TECHNICAL_AGENT: '#22c55e',
+    FUNDAMENTAL_AGENT: '#f59e0b',
+    SENTIMENT_AGENT: '#d946ef',
+    AGGREGATOR: '#60a5fa',
+    RISK: '#fb7185',
+    EXECUTION: '#22d3ee'
+  };
+
+  const nodeState = (node: string) => graphStatus[node] || 'idle';
+  const isActive = (node: string) => ['start', 'processing'].includes(nodeState(node));
+  const isDone = (node: string) => nodeState(node) === 'done';
+  const lineColor = (node: string) => (isDone(node) ? alpha(nodeTone[node], 0.7) : isActive(node) ? alpha(nodeTone[node], 0.95) : alpha('#64748b', 0.24));
+
+  return (
+    <GlassPanel sx={{ p: 1.5 }}>
+      <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Real-time AI decision workflow</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 240px 170px 170px' }, gap: 1, alignItems: 'center' }}>
+        <PipelineNode title="DATA COLLECTION" subtitle="Fetching Market Data..." state={nodeState('DATA')} tone={nodeTone.DATA} />
+        <Box sx={{ display: 'grid', gap: 0.8 }}>
+          <PipelineNode title="TECHNICAL ANALYSIS" subtitle="Analyzing Charts..." state={nodeState('TECHNICAL_AGENT')} tone={nodeTone.TECHNICAL_AGENT} compact />
+          <PipelineNode title="FUNDAMENTAL ANALYSIS" subtitle="Evaluating Reports..." state={nodeState('FUNDAMENTAL_AGENT')} tone={nodeTone.FUNDAMENTAL_AGENT} compact />
+          <PipelineNode title="SENTIMENT ANALYSIS" subtitle="Assessing News..." state={nodeState('SENTIMENT_AGENT')} tone={nodeTone.SENTIMENT_AGENT} compact />
+        </Box>
+        <PipelineNode title="LLM AGGREGATOR" subtitle="Generating Decision..." state={nodeState('AGGREGATOR')} tone={nodeTone.AGGREGATOR} focus extra={llmStreamText ? llmStreamText.slice(-110) : 'thinking…'} />
+        <PipelineNode title="RISK" subtitle="Checking Limits..." state={nodeState('RISK')} tone={nodeTone.RISK} extra={String(latestRiskEvent?.type || 'awaiting')} />
+        <PipelineNode title="EXECUTION" subtitle="Executing Order..." state={nodeState('EXECUTION')} tone={nodeTone.EXECUTION} extra={latestExecutionEvent ? 'trade sent' : 'queueing'} />
+      </Box>
+
+      <Stack direction="row" spacing={0.8} sx={{ my: 1.2, overflowX: 'auto' }}>
+        {['DATA', 'TECHNICAL_AGENT', 'FUNDAMENTAL_AGENT', 'SENTIMENT_AGENT', 'AGGREGATOR', 'RISK', 'EXECUTION'].map((node) => (
+          <Box
+            key={`flow-${node}`}
+            sx={{
+              height: 4,
+              minWidth: 100,
+              borderRadius: 2,
+              bgcolor: lineColor(node),
+              backgroundImage: `linear-gradient(90deg, transparent 0%, ${alpha('#e2e8f0', 0.85)} 50%, transparent 100%)`,
+              backgroundSize: '160px 100%',
+              animation: isActive(node) ? `${flowAnim} 1.2s linear infinite` : 'none'
+            }}
+          />
+        ))}
+      </Stack>
+
+      <Box sx={{ p: 1, borderRadius: 1.2, bgcolor: alpha('#0b1220', 0.6), border: '1px solid rgba(148,163,184,0.18)' }}>
+        <Typography sx={{ fontSize: 11.5, color: '#8da0bb', mb: 0.7 }}>Activity log / Event feed</Typography>
+        <Stack spacing={0.55} sx={{ maxHeight: 132, overflowY: 'auto' }}>
+          {events.map((event, index) => (
+            <Typography key={`${event.timestamp || index}-${event.type || 'evt'}`} sx={{ fontSize: 11.5, color: '#cbd5e1' }}>
+              {(event.type || 'EVENT').split('_').join(' ')}: {event.reason || event.action || String(event.status || event.node || 'update')}
+            </Typography>
+          ))}
+          {!events.length ? <Typography sx={{ fontSize: 11.5, color: '#64748b' }}>No events yet.</Typography> : null}
+        </Stack>
+      </Box>
+    </GlassPanel>
+  );
+}
+
+function PipelineNode({
+  title,
+  subtitle,
+  state,
+  tone,
+  compact,
+  focus,
+  extra
+}: {
+  title: string;
+  subtitle: string;
+  state: string;
+  tone: string;
+  compact?: boolean;
+  focus?: boolean;
+  extra?: string;
+}) {
+  const active = ['start', 'processing'].includes(state);
+  const done = state === 'done';
+  return (
+    <Box
+      sx={{
+        p: compact ? 0.9 : 1.05,
+        borderRadius: 1.8,
+        minHeight: compact ? 72 : focus ? 132 : 112,
+        border: `1px solid ${alpha(tone, active ? 0.86 : done ? 0.54 : 0.26)}`,
+        background: `linear-gradient(145deg, ${alpha('#020617', 0.94)}, ${alpha(tone, active ? 0.18 : 0.07)})`,
+        boxShadow: active ? `0 0 20px ${alpha(tone, 0.58)}` : done ? `0 0 14px ${alpha(tone, 0.38)}` : 'none'
+      }}
+    >
+      <Typography sx={{ fontSize: focus ? 14 : 12.8, letterSpacing: '0.04em', color: alpha(tone, 0.95), fontWeight: 600 }}>{title}</Typography>
+      <Typography sx={{ fontSize: 12, color: '#dbeafe', mt: 0.4 }}>{subtitle}</Typography>
+      <Typography sx={{ fontSize: 11.2, color: '#8da0bb', mt: 0.6, animation: active ? `${thinkAnim} 1.3s ease-in-out infinite` : 'none' }}>
+        {extra || (active ? 'processing…' : done ? 'complete' : 'idle')}
+      </Typography>
+    </Box>
   );
 }
 
