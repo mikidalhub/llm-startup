@@ -370,7 +370,11 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
             return;
           }
         }
-        createJsonResponse(res, detail);
+        const history = await engine.marketData.getChart(symbol, { range: '1mo', interval: '1d' }).catch(() => ({ closes: [], timestamps: [] }));
+        createJsonResponse(res, {
+          ...detail,
+          history: history.closes.map((close, idx) => ({ ts: history.timestamps[idx], close }))
+        });
         return;
       }
 

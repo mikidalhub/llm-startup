@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
@@ -74,6 +75,7 @@ type WorkflowStep = {
   dataHint: string;
   status: string;
 };
+type StockSummary = { symbol: string; currentPrice?: number | null; name?: string };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -99,6 +101,8 @@ export default function HomePage() {
   const [llmStreamText, setLlmStreamText] = useState('');
   const [tradeLimit, setTradeLimit] = useState(6);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+  const [uiMode, setUiMode] = useState<'light' | 'dark'>('light');
+  const [stocks, setStocks] = useState<StockSummary[]>([]);
 
   useEffect(() => {
     const hydrate = async () => {
@@ -110,18 +114,28 @@ export default function HomePage() {
           if (bootstrap.results) setResults(bootstrap.results);
           if (bootstrap.decisions) setDecisions(bootstrap.decisions);
           if (bootstrap.events) setEvents(bootstrap.events);
+          const stocksRes = await fetch(`${API_BASE}/api/stocks`);
+          if (stocksRes.ok) {
+            const stockPayload = await stocksRes.json();
+            setStocks((stockPayload?.details || []).slice(0, 7));
+          }
           return;
         }
 
-        const [stateRes, resultsRes, decisionsRes] = await Promise.all([
+        const [stateRes, resultsRes, decisionsRes, stocksRes] = await Promise.all([
           fetch(`${API_BASE}/api/state`),
           fetch(`${API_BASE}/api/results`),
-          fetch(`${API_BASE}/api/decisions`)
+          fetch(`${API_BASE}/api/decisions`),
+          fetch(`${API_BASE}/api/stocks`)
         ]);
 
         if (stateRes.ok) setEngineState(await stateRes.json());
         if (resultsRes.ok) setResults(await resultsRes.json());
         if (decisionsRes.ok) setDecisions(await decisionsRes.json());
+        if (stocksRes.ok) {
+          const stockPayload = await stocksRes.json();
+          setStocks((stockPayload?.details || []).slice(0, 7));
+        }
       } catch {
         // offline preview
       }
@@ -167,11 +181,15 @@ export default function HomePage() {
   const equityCurve = engineState.portfolio?.equityCurve || [];
   const now = new Date();
   const todayIso = new Date().toISOString().slice(0, 10);
+  const isDark = uiMode === 'dark';
+  const canvasBg = isDark ? '#030508' : '#eef2f7';
+  const canvasText = isDark ? '#e2e8f0' : '#0f172a';
   const trades = useMemo(() => {
     const source = results.trades || [];
     const filtered = filterDate ? source.filter((trade) => (trade.ts || '').startsWith(filterDate)) : source;
     return filtered.slice(-16).reverse();
   }, [filterDate, results.trades]);
+  const topStocks = useMemo(() => stocks.slice(0, 7), [stocks]);
   const dailyChange = equityCurve.length > 1 ? equityCurve.at(-1)!.value - equityCurve.at(-2)!.value : 0;
   const netProfit = metrics.pnl || 0;
   const revenue = useMemo(() => {
@@ -256,11 +274,16 @@ export default function HomePage() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#030508', color: '#e2e8f0', p: 2.4 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: canvasBg, color: canvasText, p: 2.4, transition: 'all 0.25s ease' }}>
       <Stack spacing={1.8} sx={{ mr: { md: '360px', xs: 0 } }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: '#7c8ca3' }}>AI MULTI-AGENT TRADING</Typography>
-          <LiveProcessingIndicator isLive={Boolean(engineState.status?.running)} />
+          <Typography sx={{ fontSize: 11, letterSpacing: '0.22em', color: isDark ? '#7c8ca3' : '#475569' }}>AI MULTI-AGENT TRADING</Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button size="small" variant="outlined" onClick={() => setUiMode((prev) => (prev === 'light' ? 'dark' : 'light'))}>
+              {uiMode === 'light' ? 'Dark mode' : 'Light mode'}
+            </Button>
+            <LiveProcessingIndicator isLive={Boolean(engineState.status?.running)} />
+          </Stack>
         </Stack>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
@@ -274,6 +297,28 @@ export default function HomePage() {
           <MetricCard title="Daily Change" value={formatUsd(dailyChange)} subtitle="Last step delta" positive={dailyChange >= 0} />
           <MetricCard title="Revenue" value={formatUsd(revenue)} subtitle="From actions" positive={revenue >= 0} />
         </Stack>
+
+        <GlassPanel>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+            <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Tracked stocks (max 7)</Typography>
+            <Typography sx={{ fontSize: 11, color: '#64748b' }}>Click for details + history chart</Typography>
+          </Stack>
+          <Stack spacing={0.7}>
+            {topStocks.map((stock) => (
+              <Button
+                key={stock.symbol}
+                component={Link}
+                href={`/stocks?symbol=${stock.symbol}`}
+                variant="text"
+                sx={{ justifyContent: 'space-between', border: '1px solid rgba(148,163,184,0.22)', borderRadius: 1.2, px: 1.2, py: 0.7 }}
+              >
+                <Typography sx={{ fontSize: 12.5, color: '#cbd5e1' }}>{stock.symbol}</Typography>
+                <Typography sx={{ fontSize: 12.5, color: '#86efac' }}>{formatUsd(stock.currentPrice || 0)}</Typography>
+              </Button>
+            ))}
+            {!topStocks.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No stocks loaded yet.</Typography> : null}
+          </Stack>
+        </GlassPanel>
 
         <GlassPanel>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ md: 'center' }}>
@@ -405,8 +450,8 @@ export default function HomePage() {
         PaperProps={{
           sx: {
             width: 340,
-            bgcolor: alpha('#050911', 0.88),
-            color: '#e2e8f0',
+            bgcolor: isDark ? alpha('#050911', 0.88) : alpha('#f8fafc', 0.96),
+            color: isDark ? '#e2e8f0' : '#0f172a',
             p: 2,
             borderLeft: '1px solid rgba(148,163,184,0.16)',
             backdropFilter: 'blur(14px) saturate(120%)'

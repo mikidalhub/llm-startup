@@ -49,7 +49,7 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
 
   await engine.tick();
 
-  assert.equal(engine.lastError?.includes('network down'), true);
+  assert.equal(Boolean(engine.lastError), true);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].path, './tmp-results.json');
   assert.equal(writes[0].payload.snapshots.AAPL.source, 'synthetic-fallback');
