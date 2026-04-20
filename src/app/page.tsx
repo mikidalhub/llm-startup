@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -76,8 +76,19 @@ type WorkflowStep = {
   status: string;
 };
 type StockSummary = { symbol: string; currentPrice?: number | null; name?: string };
+type HomeDashboardCache = {
+  state: EngineState;
+  results: ResultsPayload;
+  decisions: Decision[];
+  events: ProcessEvent[];
+  stocks: StockSummary[];
+  fetchedAt: number;
+};
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const HOME_CACHE_TTL_MS = 30_000;
+const HOME_SESSION_KEY = 'home-dashboard-cache-v1';
+let homeDashboardCache: HomeDashboardCache | null = null;
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
 const formatPct = (value: number) => `${(value || 0).toFixed(2)}%`;
 
@@ -103,21 +114,69 @@ export default function HomePage() {
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
   const [uiMode, setUiMode] = useState<'light' | 'dark'>('light');
   const [stocks, setStocks] = useState<StockSummary[]>([]);
+  const hasHydratedFromCache = useRef(false);
 
   useEffect(() => {
-    const hydrate = async () => {
+    const fromMemoryCache = homeDashboardCache;
+    if (fromMemoryCache) {
+      setEngineState(fromMemoryCache.state);
+      setResults(fromMemoryCache.results);
+      setDecisions(fromMemoryCache.decisions);
+      setEvents(fromMemoryCache.events);
+      setStocks(fromMemoryCache.stocks);
+      hasHydratedFromCache.current = true;
+    } else if (typeof window !== 'undefined') {
+      try {
+        const serialized = window.sessionStorage.getItem(HOME_SESSION_KEY);
+        if (serialized) {
+          const parsed = JSON.parse(serialized) as HomeDashboardCache;
+          if (parsed?.fetchedAt) {
+            homeDashboardCache = parsed;
+            setEngineState(parsed.state);
+            setResults(parsed.results);
+            setDecisions(parsed.decisions);
+            setEvents(parsed.events);
+            setStocks(parsed.stocks);
+            hasHydratedFromCache.current = true;
+          }
+        }
+      } catch {
+        // ignore malformed cache
+      }
+    }
+
+    const hydrate = async (force = false) => {
+      if (!force && homeDashboardCache && Date.now() - homeDashboardCache.fetchedAt < HOME_CACHE_TTL_MS) return;
       try {
         const bootstrapRes = await fetch(`${API_BASE}/api/bootstrap`);
         if (bootstrapRes.ok) {
           const bootstrap = await bootstrapRes.json();
-          if (bootstrap.state) setEngineState(bootstrap.state);
-          if (bootstrap.results) setResults(bootstrap.results);
-          if (bootstrap.decisions) setDecisions(bootstrap.decisions);
-          if (bootstrap.events) setEvents(bootstrap.events);
+          const nextState = bootstrap.state || {};
+          const nextResults = bootstrap.results || { trades: [], signals: [] };
+          const nextDecisions = bootstrap.decisions || [];
+          const nextEvents = bootstrap.events || [];
+          setEngineState(nextState);
+          setResults(nextResults);
+          setDecisions(nextDecisions);
+          setEvents(nextEvents);
           const stocksRes = await fetch(`${API_BASE}/api/stocks`);
+          let nextStocks: StockSummary[] = [];
           if (stocksRes.ok) {
             const stockPayload = await stocksRes.json();
-            setStocks((stockPayload?.details || []).slice(0, 7));
+            nextStocks = (stockPayload?.details || []).slice(0, 7);
+            setStocks(nextStocks);
+          }
+          const cachedPayload = {
+            state: nextState,
+            results: nextResults,
+            decisions: nextDecisions,
+            events: nextEvents,
+            stocks: nextStocks,
+            fetchedAt: Date.now()
+          };
+          homeDashboardCache = cachedPayload;
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(cachedPayload));
           }
           return;
         }
@@ -129,26 +188,51 @@ export default function HomePage() {
           fetch(`${API_BASE}/api/stocks`)
         ]);
 
-        if (stateRes.ok) setEngineState(await stateRes.json());
-        if (resultsRes.ok) setResults(await resultsRes.json());
-        if (decisionsRes.ok) setDecisions(await decisionsRes.json());
+        const nextState = stateRes.ok ? await stateRes.json() : {};
+        const nextResults = resultsRes.ok ? await resultsRes.json() : { trades: [], signals: [] };
+        const nextDecisions = decisionsRes.ok ? await decisionsRes.json() : [];
+        setEngineState(nextState);
+        setResults(nextResults);
+        setDecisions(nextDecisions);
+        let nextStocks: StockSummary[] = [];
         if (stocksRes.ok) {
           const stockPayload = await stocksRes.json();
-          setStocks((stockPayload?.details || []).slice(0, 7));
+          nextStocks = (stockPayload?.details || []).slice(0, 7);
+          setStocks(nextStocks);
+        }
+        const cachedPayload = {
+          state: nextState,
+          results: nextResults,
+          decisions: nextDecisions,
+          events,
+          stocks: nextStocks,
+          fetchedAt: Date.now()
+        };
+        homeDashboardCache = cachedPayload;
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(cachedPayload));
         }
       } catch {
         // offline preview
       }
     };
 
-    void hydrate();
-    const interval = setInterval(() => void hydrate(), 10000);
+    void hydrate(!hasHydratedFromCache.current);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void hydrate();
+    }, 10000);
 
     if (typeof window !== 'undefined') {
       const stream = new EventSource(`${API_BASE}/events`);
       stream.addEventListener('state', (raw) => {
         try {
-          setEngineState(JSON.parse((raw as MessageEvent).data) as EngineState);
+          const nextState = JSON.parse((raw as MessageEvent).data) as EngineState;
+          setEngineState(nextState);
+          if (homeDashboardCache) {
+            homeDashboardCache = { ...homeDashboardCache, state: nextState, fetchedAt: Date.now() };
+            window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(homeDashboardCache));
+          }
         } catch {
           // ignore malformed event
         }
@@ -156,7 +240,14 @@ export default function HomePage() {
       stream.addEventListener('process', (raw) => {
         try {
           const parsed = JSON.parse((raw as MessageEvent).data) as ProcessEvent;
-          setEvents((prev) => [...prev, parsed].slice(-220));
+          setEvents((prev) => {
+            const next = [...prev, parsed].slice(-220);
+            if (homeDashboardCache) {
+              homeDashboardCache = { ...homeDashboardCache, events: next, fetchedAt: Date.now() };
+              window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(homeDashboardCache));
+            }
+            return next;
+          });
           if (parsed.type === 'LLM_STREAM') {
             const token = String((parsed.payload?.token as string) || '');
             if (token) {
@@ -229,6 +320,7 @@ export default function HomePage() {
     [events]
   );
   const activePhase = useMemo(() => graphNodes.find((node) => ['processing', 'start'].includes(graphStatus[node])) || 'IDLE', [graphNodes, graphStatus]);
+  const activeWorkflowStepId = useMemo(() => workflowStatusToActiveId(graphNodes, graphStatus), [graphNodes, graphStatus]);
   const workflowSteps = useMemo(
     () =>
       graphNodes.map((node) => ({
@@ -299,41 +391,19 @@ export default function HomePage() {
         </Stack>
 
         <GlassPanel>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-            <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Tracked stocks (max 7)</Typography>
-            <Typography sx={{ fontSize: 11, color: '#64748b' }}>Click for details + history chart</Typography>
-          </Stack>
-          <Stack spacing={0.7}>
-            {topStocks.map((stock) => (
-              <Button
-                key={stock.symbol}
-                component={Link}
-                href={`/stocks?symbol=${stock.symbol}`}
-                variant="text"
-                sx={{ justifyContent: 'space-between', border: '1px solid rgba(148,163,184,0.22)', borderRadius: 1.2, px: 1.2, py: 0.7 }}
-              >
-                <Typography sx={{ fontSize: 12.5, color: '#cbd5e1' }}>{stock.symbol}</Typography>
-                <Typography sx={{ fontSize: 12.5, color: '#86efac' }}>{formatUsd(stock.currentPrice || 0)}</Typography>
-              </Button>
-            ))}
-            {!topStocks.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No stocks loaded yet.</Typography> : null}
-          </Stack>
-        </GlassPanel>
-
-        <GlassPanel>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ md: 'center' }}>
             <Box>
-              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Bootstrap request</Typography>
+              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Data loading strategy</Typography>
               <Typography sx={{ fontSize: 12, color: '#cbd5e1' }}>
-                Initial load that asks the backend for state + decisions + events so beginners see one complete picture.
+                Home data is cached in session state to avoid repeated heavy requests when returning to this page.
               </Typography>
             </Box>
-            <Tooltip title="A bootstrap request is the app's first all-in-one data fetch used to hydrate the dashboard quickly.">
-              <Chip size="small" label="What is this?" sx={{ ...badgeSx, cursor: 'help' }} />
+            <Tooltip title="The dashboard refreshes from cache first, then silently syncs in the background when needed.">
+              <Chip size="small" label="Reduced API load" sx={{ ...badgeSx, cursor: 'help' }} />
             </Tooltip>
           </Stack>
           <Typography sx={{ mt: 0.8, fontSize: 11, color: '#64748b' }}>
-            Dynamic date and live stream are generated in real time from client clock + server events.
+            Trading cadence: once per day (scheduled by backend) or manually with the Run trading now button.
           </Typography>
         </GlassPanel>
 
@@ -357,6 +427,7 @@ export default function HomePage() {
           latestRiskEvent={latestRiskEvent}
           latestExecutionEvent={latestExecutionEvent}
           steps={workflowSteps}
+          activeStepId={activeWorkflowStepId}
           onStepClick={setSelectedStep}
         />
 
@@ -365,7 +436,9 @@ export default function HomePage() {
             <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Equity curve</Typography>
             <EquityCurve points={equityCurve} />
           </GlassPanel>
+        </Stack>
 
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ flex: 1 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
               <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Recent trades</Typography>
@@ -393,6 +466,28 @@ export default function HomePage() {
               ))}
               {!trades.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No trades yet.</Typography> : null}
               {tradeLimit < trades.length ? <Button size="small" onClick={() => setTradeLimit((prev) => prev + 6)}>Load more</Button> : null}
+            </Stack>
+          </GlassPanel>
+
+          <GlassPanel sx={{ flex: 1 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Tracked stocks (max 7)</Typography>
+              <Typography sx={{ fontSize: 11, color: '#64748b' }}>Next to recent trades</Typography>
+            </Stack>
+            <Stack spacing={0.7}>
+              {topStocks.map((stock) => (
+                <Button
+                  key={stock.symbol}
+                  component={Link}
+                  href={`/stocks?symbol=${stock.symbol}`}
+                  variant="text"
+                  sx={{ justifyContent: 'space-between', border: '1px solid rgba(148,163,184,0.22)', borderRadius: 1.2, px: 1.2, py: 0.7 }}
+                >
+                  <Typography sx={{ fontSize: 12.5, color: '#cbd5e1' }}>{stock.symbol}</Typography>
+                  <Typography sx={{ fontSize: 12.5, color: '#86efac' }}>{formatUsd(stock.currentPrice || 0)}</Typography>
+                </Button>
+              ))}
+              {!topStocks.length ? <Typography sx={{ fontSize: 12, color: '#64748b' }}>No stocks loaded yet.</Typography> : null}
             </Stack>
           </GlassPanel>
         </Stack>
@@ -583,6 +678,7 @@ function TradingPipelineGraph({
   latestRiskEvent,
   latestExecutionEvent,
   steps,
+  activeStepId,
   onStepClick
 }: {
   graphStatus: Record<string, string>;
@@ -590,6 +686,7 @@ function TradingPipelineGraph({
   latestRiskEvent: ProcessEvent | undefined;
   latestExecutionEvent: ProcessEvent | undefined;
   steps: WorkflowStep[];
+  activeStepId: string | null;
   onStepClick: (step: WorkflowStep) => void;
 }) {
   const nodeTone: Record<string, string> = {
@@ -603,6 +700,7 @@ function TradingPipelineGraph({
   };
 
   const nodeState = (node: string) => graphStatus[node] || 'idle';
+  const getStepById = (id: string) => steps.find((step) => step.id === id);
   const isActive = (node: string) => ['start', 'processing'].includes(nodeState(node));
   const isDone = (node: string) => nodeState(node) === 'done';
   const lineColor = (node: string) => (isDone(node) ? alpha(nodeTone[node], 0.7) : isActive(node) ? alpha(nodeTone[node], 0.95) : alpha('#64748b', 0.24));
@@ -610,35 +708,16 @@ function TradingPipelineGraph({
   return (
     <GlassPanel sx={{ p: 1.5 }}>
       <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Real-time AI decision workflow</Typography>
-      <Stack direction="row" spacing={0.7} sx={{ mb: 1.1, overflowX: 'auto', flexWrap: 'wrap' }}>
-        {steps.map((step, idx) => (
-          <Box
-            key={step.id}
-            onClick={() => onStepClick(step)}
-            sx={{
-              minWidth: 110,
-              px: 1,
-              py: 0.8,
-              borderRadius: 1.2,
-              cursor: 'pointer',
-              border: `1px solid ${alpha(step.status === 'processing' ? '#22c55e' : '#64748b', 0.45)}`,
-              bgcolor: alpha('#0f172a', 0.48)
-            }}
-          >
-            <Typography sx={{ fontSize: 11.5, color: '#cbd5e1' }}>{idx + 1}. {step.title}</Typography>
-          </Box>
-        ))}
-      </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 240px 170px 170px' }, gap: 1, alignItems: 'center' }}>
-        <PipelineNode title="DATA COLLECTION" subtitle="Fetching Market Data..." state={nodeState('DATA')} tone={nodeTone.DATA} />
+        <PipelineNode title="DATA COLLECTION" subtitle="Fetching market data..." state={nodeState('DATA')} tone={nodeTone.DATA} onClick={() => { const step = getStepById('DATA'); if (step) onStepClick(step); }} />
         <Box sx={{ display: 'grid', gap: 0.8 }}>
-          <PipelineNode title="TECHNICAL ANALYSIS" subtitle="Analyzing Charts..." state={nodeState('TECHNICAL_AGENT')} tone={nodeTone.TECHNICAL_AGENT} compact />
-          <PipelineNode title="FUNDAMENTAL ANALYSIS" subtitle="Evaluating Reports..." state={nodeState('FUNDAMENTAL_AGENT')} tone={nodeTone.FUNDAMENTAL_AGENT} compact />
-          <PipelineNode title="SENTIMENT ANALYSIS" subtitle="Assessing News..." state={nodeState('SENTIMENT_AGENT')} tone={nodeTone.SENTIMENT_AGENT} compact />
+          <PipelineNode title="TECHNICAL ANALYSIS" subtitle="Analyzing charts..." state={nodeState('TECHNICAL_AGENT')} tone={nodeTone.TECHNICAL_AGENT} compact onClick={() => { const step = getStepById('TECHNICAL_AGENT'); if (step) onStepClick(step); }} />
+          <PipelineNode title="FUNDAMENTAL ANALYSIS" subtitle="Evaluating reports..." state={nodeState('FUNDAMENTAL_AGENT')} tone={nodeTone.FUNDAMENTAL_AGENT} compact onClick={() => { const step = getStepById('FUNDAMENTAL_AGENT'); if (step) onStepClick(step); }} />
+          <PipelineNode title="SENTIMENT ANALYSIS" subtitle="Assessing news..." state={nodeState('SENTIMENT_AGENT')} tone={nodeTone.SENTIMENT_AGENT} compact onClick={() => { const step = getStepById('SENTIMENT_AGENT'); if (step) onStepClick(step); }} />
         </Box>
-        <PipelineNode title="LLM AGGREGATOR" subtitle="Generating Decision..." state={nodeState('AGGREGATOR')} tone={nodeTone.AGGREGATOR} focus extra={llmStreamText ? llmStreamText.slice(-110) : 'thinking…'} />
-        <PipelineNode title="RISK" subtitle="Checking Limits..." state={nodeState('RISK')} tone={nodeTone.RISK} extra={String(latestRiskEvent?.type || 'awaiting')} />
-        <PipelineNode title="EXECUTION" subtitle="Executing Order..." state={nodeState('EXECUTION')} tone={nodeTone.EXECUTION} extra={latestExecutionEvent ? 'trade sent' : 'queueing'} />
+        <PipelineNode title="LLM AGGREGATOR" subtitle="Generating decision..." state={nodeState('AGGREGATOR')} tone={nodeTone.AGGREGATOR} focus extra={llmStreamText ? llmStreamText.slice(-110) : 'thinking…'} onClick={() => { const step = getStepById('AGGREGATOR'); if (step) onStepClick(step); }} />
+        <PipelineNode title="RISK" subtitle="Checking limits..." state={nodeState('RISK')} tone={nodeTone.RISK} extra={String(latestRiskEvent?.type || 'awaiting')} onClick={() => { const step = getStepById('RISK'); if (step) onStepClick(step); }} />
+        <PipelineNode title="EXECUTION" subtitle="Executing order..." state={nodeState('EXECUTION')} tone={nodeTone.EXECUTION} extra={latestExecutionEvent ? 'trade sent' : 'queueing'} onClick={() => { const step = getStepById('EXECUTION'); if (step) onStepClick(step); }} />
       </Box>
 
       <Stack direction="row" spacing={0.8} sx={{ my: 1.2, overflowX: 'auto' }}>
@@ -649,10 +728,10 @@ function TradingPipelineGraph({
               height: 4,
               minWidth: 100,
               borderRadius: 2,
-              bgcolor: lineColor(node),
+              bgcolor: node === activeStepId ? lineColor(node) : alpha('#64748b', 0.18),
               backgroundImage: `linear-gradient(90deg, transparent 0%, ${alpha('#e2e8f0', 0.85)} 50%, transparent 100%)`,
               backgroundSize: '160px 100%',
-              animation: isActive(node) ? `${flowAnim} 1.2s linear infinite` : 'none'
+              animation: isActive(node) && node === activeStepId ? `${flowAnim} 1.2s linear infinite` : 'none'
             }}
           />
         ))}
@@ -672,7 +751,8 @@ function PipelineNode({
   tone,
   compact,
   focus,
-  extra
+  extra,
+  onClick
 }: {
   title: string;
   subtitle: string;
@@ -681,15 +761,19 @@ function PipelineNode({
   compact?: boolean;
   focus?: boolean;
   extra?: string;
+  onClick?: () => void;
 }) {
   const active = ['start', 'processing'].includes(state);
   const done = state === 'done';
+  const runningText = state === 'processing' ? 'is processing…' : state === 'start' ? 'is starting…' : done ? 'is complete' : 'is idle';
   return (
     <Box
+      onClick={onClick}
       sx={{
         p: compact ? 0.9 : 1.05,
         borderRadius: 1.8,
         minHeight: compact ? 72 : focus ? 132 : 112,
+        cursor: onClick ? 'pointer' : 'default',
         border: `1px solid ${alpha(tone, active ? 0.86 : done ? 0.54 : 0.26)}`,
         background: `linear-gradient(145deg, ${alpha('#020617', 0.94)}, ${alpha(tone, active ? 0.18 : 0.07)})`,
         boxShadow: active ? `0 0 20px ${alpha(tone, 0.58)}` : done ? `0 0 14px ${alpha(tone, 0.38)}` : 'none'
@@ -698,10 +782,17 @@ function PipelineNode({
       <Typography sx={{ fontSize: focus ? 14 : 12.8, letterSpacing: '0.04em', color: alpha(tone, 0.95), fontWeight: 600 }}>{title}</Typography>
       <Typography sx={{ fontSize: 12, color: '#dbeafe', mt: 0.4 }}>{subtitle}</Typography>
       <Typography sx={{ fontSize: 11.2, color: '#8da0bb', mt: 0.6, animation: active ? `${thinkAnim} 1.3s ease-in-out infinite` : 'none' }}>
-        {extra || (active ? 'processing…' : done ? 'complete' : 'idle')}
+        {extra || runningText}
       </Typography>
     </Box>
   );
+}
+
+function workflowStatusToActiveId(nodes: readonly string[], statusMap: Record<string, string>): string | null {
+  const activeNode = nodes.find((node) => ['processing', 'start'].includes(statusMap[node]));
+  if (activeNode) return activeNode;
+  const doneNode = [...nodes].reverse().find((node) => statusMap[node] === 'done');
+  return doneNode || null;
 }
 
 function GlassPanel({ children, sx = {} }: { children: React.ReactNode; sx?: object }) {
