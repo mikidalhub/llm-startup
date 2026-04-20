@@ -2,7 +2,7 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export const runRiskNode = async (state, emit, context = {}) => {
   const maxPositionPct = Number(context.maxPositionPct ?? 0.1);
-  const decision = state.aggregatedDecision || { action: 'HOLD', confidence: 0, final_reasoning: 'Missing aggregate' };
+  const decision = state.aggregatedDecision || { action: 'HOLD', confidence: 0, reasoning: 'Missing aggregate' };
   const position = state.position || { shares: 0, avgCost: 0 };
   const snapshot = state.snapshot || { price: 0 };
 
@@ -36,8 +36,9 @@ export const runRiskNode = async (state, emit, context = {}) => {
     action,
     size_pct: desiredSize,
     confidence: Number(decision.confidence ?? 0.5),
-    final_reasoning: decision.final_reasoning,
-    reason: decision.final_reasoning || reason,
+    reasoning: decision.reasoning || decision.final_reasoning || reason,
+    final_reasoning: decision.reasoning || decision.final_reasoning || reason,
+    reason: decision.reasoning || decision.final_reasoning || reason,
     risk_status: status,
     risk_reason: reason
   };

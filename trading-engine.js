@@ -560,7 +560,7 @@ export class TradingEngine {
           symbol,
           action: String(decision.action || 'HOLD').toUpperCase(),
           sizePct: clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct),
-          reason: decision.final_reasoning || decision.reason || 'No reason supplied',
+          reason: decision.reasoning || decision.final_reasoning || decision.reason || 'No reason supplied',
           source,
           confidence: Number(decision.confidence ?? 0),
           riskStatus: decision.risk_status || 'RISK_APPROVED',
