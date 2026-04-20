@@ -41,6 +41,21 @@ test('LlmCacheManager.get removes expired Redis entries before continuing lookup
   assert.deepEqual(redisCalls, ['redis-stale-key']);
 });
 
+
+test('LlmCacheManager.get tolerates cleanup failures for expired Redis entries', async () => {
+  const cache = new LlmCacheManager({
+    clock: () => 10_000,
+    redisStore: {
+      getJson: async () => ({ value: { answer: 'stale-redis' }, expiresAt: 9_999 }),
+      deleteJson: async () => {
+        throw new Error('redis down');
+      }
+    }
+  });
+
+  await assert.doesNotReject(cache.get('redis-stale-key-with-delete-failure'));
+});
+
 test('LlmCacheManager.set derives createdAt and expiresAt from the same timestamp', async () => {
   const cache = new LlmCacheManager({
     ttlMs: 500,

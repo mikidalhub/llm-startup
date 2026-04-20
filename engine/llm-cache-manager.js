@@ -48,6 +48,14 @@ export class LlmCacheManager {
     return Number.isFinite(entry?.expiresAt) && entry.expiresAt <= now;
   }
 
+  bestEffortCleanup(task) {
+    Promise.resolve()
+      .then(task)
+      .catch(() => {
+        // cleanup should never fail cache lookup paths
+      });
+  }
+
   async get(key) {
     const now = this.clock();
     const cached = this.memory.get(key);
@@ -62,7 +70,7 @@ export class LlmCacheManager {
       return { ...redisEntry, layer: 'redis' };
     }
     if (redisEntry && this.isExpiredEntry(redisEntry, now)) {
-      await this.redisStore?.deleteJson?.(key);
+      this.bestEffortCleanup(() => this.redisStore?.deleteJson?.(key));
     }
 
     const coldEntry = await this.readColdEntry(key);
@@ -72,7 +80,7 @@ export class LlmCacheManager {
       return { ...coldEntry, layer: 'cold' };
     }
     if (coldEntry && this.isExpiredEntry(coldEntry, now)) {
-      await this.deleteColdEntry(key);
+      this.bestEffortCleanup(() => this.deleteColdEntry(key));
     }
 
     return null;
