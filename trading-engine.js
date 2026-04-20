@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import yaml from 'js-yaml';
-import { YahooClient } from './data/yahoo-client.js';
+import { AlpacaClient } from './data/alpaca-client.js';
 import { buildFundamentalAnalysis } from './fundamentals/engine.js';
 import { buildValueModel } from './analysis/value-model.js';
 import { buildRiskAnalysis } from './risk/engine.js';
@@ -115,7 +115,7 @@ export class TradingEngine {
     this.eventListeners = new Set();
     this.isTicking = false;
     this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: null };
-    this.yahoo = dependencies.yahoo ?? new YahooClient({ fetchImpl: this.fetchFn });
+    this.marketData = dependencies.marketData ?? new AlpacaClient({ fetchImpl: this.fetchFn });
     this.llmCache = new LlmCacheManager({ redisStore: this.redisStore });
   }
 
@@ -140,7 +140,7 @@ export class TradingEngine {
   }
 
   async fetchSymbolSnapshot(symbol) {
-    const chart = await this.yahoo.getChart(symbol, { range: '1d', interval: '5m' });
+    const chart = await this.marketData.getChart(symbol, { range: '1d', interval: '5m' });
     if (chart.closes.length < this.config.rsiPeriod + 1) throw new Error(`Not enough price history for ${symbol}`);
 
     return {
@@ -259,15 +259,15 @@ export class TradingEngine {
     const cached = this.quoteCache.get(symbol);
     const freshWindowMs = 1000 * 60 * 30;
     if (cached && Date.now() - cached.fetchedAt < freshWindowMs) return cached.data;
-    const data = await this.yahoo.getQuoteSummary(symbol);
+    const data = await this.marketData.getQuoteSummary(symbol);
     this.quoteCache.set(symbol, { fetchedAt: Date.now(), data });
     return data;
   }
 
   async buildCompanyCard(symbol) {
     const quote = await this.getQuoteData(symbol);
-    const chart = await this.yahoo.getChart(symbol, { range: '1y', interval: '1d' });
-    const bench = await this.yahoo.getChart('^GSPC', { range: '1y', interval: '1d' });
+    const chart = await this.marketData.getChart(symbol, { range: '1y', interval: '1d' });
+    const bench = await this.marketData.getChart('^GSPC', { range: '1y', interval: '1d' });
     const { total, holdings } = this.buildPortfolioWeights();
     const position = holdings.find((item) => item.symbol === symbol);
     const positionWeight = position?.weight ?? 0;
@@ -345,7 +345,7 @@ export class TradingEngine {
       }
     }
 
-    const bench = await this.yahoo.getChart('^GSPC', { range: '1y', interval: '1d' });
+    const bench = await this.marketData.getChart('^GSPC', { range: '1y', interval: '1d' });
     const pseudoPortfolioHistory = this.portfolio.equityCurve.map((point) => point.value);
     return buildRiskAnalysis({
       priceHistory: pseudoPortfolioHistory,
