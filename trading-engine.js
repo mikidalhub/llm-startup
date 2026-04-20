@@ -8,6 +8,8 @@ import { buildDividendAnalysis } from './dividends/analyzer.js';
 import { buildPortfolioBrain } from './portfolio/brain.js';
 import { DEFAULT_UNIVERSE, rankOpportunities } from './scanner/market-scanner.js';
 import { buildBeginnerView, buildExplanation } from './explainer/investment-explainer.js';
+import { runTradingGraph } from './engine/mini-graph-runner.js';
+import { createGraphEventEmitter } from './events/graph-event-broadcaster.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -525,9 +527,32 @@ export class TradingEngine {
         }
         this.snapshots[symbol] = snapshot;
 
-        this.status = { stage: 'DECIDING', message: `AI decision for ${symbol}`, running: true, lastRunAt: this.clock() };
-        const decision = await this.llmDecide(snapshot);
-        const decisionTimestamp = this.clock();
+        this.status = { stage: 'DECIDING', message: `Graph orchestration for ${symbol}`, running: true, lastRunAt: this.clock() };
+        const graphState = {
+          symbol,
+          snapshot,
+          tickSource: source,
+          tickTimestamp: this.clock(),
+          position: this.portfolio.positions[symbol] || { shares: 0, avgCost: 0 },
+          portfolioValue: this.getPortfolioValue(),
+          memory: {
+            recentDecisions: await this.redisStore?.readDecisions?.(20) ?? [],
+            recentTrades: await this.redisStore?.readTrades?.(20) ?? [],
+            metrics: this.portfolio.metrics
+          }
+        };
+        const graphEmit = createGraphEventEmitter((type, payload) => this.emitEvent(type, payload));
+        const graphContext = {
+          llm: this.config.llm,
+          fetchFn: this.fetchFn,
+          maxPositionPct: this.config.maxPositionPct,
+          executeTradeFn: (tradeSymbol, tradeSnapshot, riskDecision, tradeTs) =>
+            Promise.resolve(this.executeTrade(tradeSymbol, tradeSnapshot, riskDecision, tradeTs))
+        };
+        const orchestrated = await runTradingGraph({ state: graphState, emit: graphEmit, context: graphContext });
+        const decision = orchestrated.riskDecision;
+        const trade = orchestrated.execution;
+        const decisionTimestamp = graphState.tickTimestamp;
         this.emitEvent('decision-made', { symbol, action: decision.action, size_pct: decision.size_pct });
         const decisionRecord = {
           id: `${symbol}-${decisionTimestamp}`,
@@ -535,14 +560,21 @@ export class TradingEngine {
           symbol,
           action: String(decision.action || 'HOLD').toUpperCase(),
           sizePct: clamp(Number(decision.size_pct || 0), 0, this.config.maxPositionPct),
-          reason: decision.reason || 'No reason supplied',
-          source
+          reason: decision.reasoning || decision.final_reasoning || decision.reason || 'No reason supplied',
+          source,
+          confidence: Number(decision.confidence ?? 0),
+          riskStatus: decision.risk_status || 'RISK_APPROVED',
+          riskReason: decision.risk_reason || null,
+          graph: {
+            technical: orchestrated.agentOutputs?.technical || null,
+            fundamental: orchestrated.agentOutputs?.fundamental || null,
+            sentiment: orchestrated.agentOutputs?.sentiment || null
+          }
         };
 
         await this.redisStore?.appendDecision(decisionRecord);
 
         this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
-        const trade = this.executeTrade(symbol, snapshot, decision, decisionTimestamp);
 
         await this.redisStore?.appendTrade(trade);
         const operationResult = this.computeOperationResult(trade, snapshot);
