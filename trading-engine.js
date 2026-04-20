@@ -10,6 +10,7 @@ import { DEFAULT_UNIVERSE, rankOpportunities } from './scanner/market-scanner.js
 import { buildBeginnerView, buildExplanation } from './explainer/investment-explainer.js';
 import { runTradingGraph } from './engine/mini-graph-runner.js';
 import { createGraphEventEmitter } from './events/graph-event-broadcaster.js';
+import { LlmCacheManager } from './engine/llm-cache-manager.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -115,6 +116,7 @@ export class TradingEngine {
     this.isTicking = false;
     this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: null };
     this.yahoo = dependencies.yahoo ?? new YahooClient({ fetchImpl: this.fetchFn });
+    this.llmCache = new LlmCacheManager({ redisStore: this.redisStore });
   }
 
   onUpdate(listener) {
@@ -545,6 +547,7 @@ export class TradingEngine {
         const graphContext = {
           llm: this.config.llm,
           fetchFn: this.fetchFn,
+          llmCache: this.llmCache,
           maxPositionPct: this.config.maxPositionPct,
           executeTradeFn: (tradeSymbol, tradeSnapshot, riskDecision, tradeTs) =>
             Promise.resolve(this.executeTrade(tradeSymbol, tradeSnapshot, riskDecision, tradeTs))
@@ -573,6 +576,12 @@ export class TradingEngine {
         };
 
         await this.redisStore?.appendDecision(decisionRecord);
+        this.emitEvent('llm-cache', {
+          symbol,
+          hit: Boolean(orchestrated.aggregatedDecision?.cache?.hit),
+          layer: orchestrated.aggregatedDecision?.cache?.layer || null,
+          deduped: Boolean(orchestrated.aggregatedDecision?.cache?.deduped)
+        });
 
         this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
 
@@ -638,6 +647,7 @@ export class TradingEngine {
       portfolio: this.portfolio,
       lastError: this.lastError,
       status: this.status,
+      llmCost: this.llmCache.getCostSummary(),
       schedule: {
         dailyRunAt: `${String(this.config.dailySchedule?.hour ?? 9).padStart(2, '0')}:${String(this.config.dailySchedule?.minute ?? 0).padStart(2, '0')}`,
         timezone: this.config.dailySchedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),

@@ -108,5 +108,22 @@ export class RedisStore {
       .filter(Boolean)
       .reverse();
   }
-}
 
+  async setJson(suffix, value, ttlSeconds = 0) {
+    if (!this.connected) return false;
+    const key = this.key(suffix);
+    const payload = JSON.stringify(value);
+    if (ttlSeconds > 0) {
+      await this.client.set(key, payload, { EX: ttlSeconds });
+    } else {
+      await this.client.set(key, payload);
+    }
+    return true;
+  }
+
+  async getJson(suffix, fallback = null) {
+    if (!this.connected) return fallback;
+    const raw = await this.client.get(this.key(suffix));
+    return safeParse(raw, fallback);
+  }
+}
