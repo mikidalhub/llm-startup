@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -33,6 +33,10 @@ type EngineState = {
     };
     positions?: Record<string, { shares: number; avgCost: number }>;
     equityCurve?: Array<{ ts: string; value: number }>;
+  };
+  llmCost?: {
+    session?: { calls?: number; totalTokens?: number; estimatedUsd?: number };
+    byStrategy?: Record<string, { calls?: number; totalTokens?: number; estimatedUsd?: number }>;
   };
   lastError?: string | null;
 };
@@ -93,10 +97,8 @@ export default function HomePage() {
   const [filterDate, setFilterDate] = useState('');
   const [isTriggering, setIsTriggering] = useState(false);
   const [llmStreamText, setLlmStreamText] = useState('');
-  const [displayedEvents, setDisplayedEvents] = useState<ProcessEvent[]>([]);
   const [tradeLimit, setTradeLimit] = useState(6);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
-  const lastDisplayedEventKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const hydrate = async () => {
@@ -161,35 +163,6 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  const getEventKey = (event: ProcessEvent) =>
-    `${event.timestamp || ''}|${event.type || ''}|${event.node || ''}|${event.status || ''}|${event.symbol || ''}|${event.action || ''}|${event.reason || ''}`;
-
-  useEffect(() => {
-    setDisplayedEvents([]);
-    lastDisplayedEventKeyRef.current = null;
-  }, [filterDate]);
-
-  useEffect(() => {
-    if (!events.length) return;
-    const timer = setInterval(() => {
-      setDisplayedEvents((prev) => {
-        const nextIndex = (() => {
-          if (!lastDisplayedEventKeyRef.current) return 0;
-          const lastIndex = events.findIndex((event) => getEventKey(event) === lastDisplayedEventKeyRef.current);
-          if (lastIndex === -1) return Math.max(0, events.length - 1);
-          return lastIndex + 1;
-        })();
-
-        if (nextIndex >= events.length) return prev;
-
-        const nextEvent = events[nextIndex];
-        lastDisplayedEventKeyRef.current = getEventKey(nextEvent);
-        return [...prev, nextEvent].slice(-60);
-      });
-    }, 700);
-    return () => clearInterval(timer);
-  }, [events]);
-
   const metrics = engineState.portfolio?.metrics || {};
   const equityCurve = engineState.portfolio?.equityCurve || [];
   const now = new Date();
@@ -237,7 +210,6 @@ export default function HomePage() {
     () => [...events].reverse().find((item) => item.type === 'EXECUTION_RESULT'),
     [events]
   );
-  const latestPipelineEvents = useMemo(() => events.slice(-22).reverse(), [events]);
   const activePhase = useMemo(() => graphNodes.find((node) => ['processing', 'start'].includes(graphStatus[node])) || 'IDLE', [graphNodes, graphStatus]);
   const workflowSteps = useMemo(
     () =>
@@ -269,7 +241,6 @@ export default function HomePage() {
       })),
     [graphNodes, graphStatus, latestExecutionEvent?.payload?.status, latestRiskEvent?.payload?.reason, latestRiskEvent?.type, llmStreamText]
   );
-
 
   const triggerManualRun = async () => {
     setIsTriggering(true);
@@ -340,7 +311,6 @@ export default function HomePage() {
           llmStreamText={llmStreamText}
           latestRiskEvent={latestRiskEvent}
           latestExecutionEvent={latestExecutionEvent}
-          events={latestPipelineEvents}
           steps={workflowSteps}
           onStepClick={setSelectedStep}
         />
@@ -402,6 +372,9 @@ export default function HomePage() {
             <Chip size="small" label="timeline history" sx={badgeSx} />
             <Chip size="small" label="memory badge" sx={badgeSx} />
             <Chip size="small" label="stored insights" sx={badgeSx} />
+            <Chip size="small" label={`LLM calls: ${engineState.llmCost?.session?.calls || 0}`} sx={badgeSx} />
+            <Chip size="small" label={`Tokens: ${engineState.llmCost?.session?.totalTokens || 0}`} sx={badgeSx} />
+            <Chip size="small" label={`Est cost: ${formatUsd(engineState.llmCost?.session?.estimatedUsd || 0)}`} sx={badgeSx} />
             <Chip size="small" label={engineState.lastError ? 'risk: guarded' : 'risk: normal'} sx={badgeSx} />
           </Stack>
         </GlassPanel>
@@ -499,18 +472,10 @@ export default function HomePage() {
         </Box>
 
         <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
-        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live process log (structured)</Typography>
-        <Stack spacing={0.7} sx={{ maxHeight: '38vh', overflowY: 'auto' }}>
-          {displayedEvents.slice(-18).reverse().map((event, index) => (
-            <Box key={`${event.timestamp || index}-${event.type || 'event'}`} sx={{ p: 0.9, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
-              <Stack direction="row" spacing={0.8} alignItems="center">
-                <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}{event.node ? ` · ${event.node}` : ''}</Typography>
-                <Chip size="small" label={resolveSeverity(event)} sx={{ height: 18, fontSize: 10, color: '#dbeafe', bgcolor: alpha(resolveSeverityColor(event), 0.25) }} />
-              </Stack>
-              <Typography sx={{ fontSize: 12 }}>{event.symbol ? `${event.symbol} · ` : ''}{event.reason || event.action || (event.status ? `status: ${event.status}` : 'state update')}</Typography>
-            </Box>
-          ))}
-        </Stack>
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live states</Typography>
+        <Typography sx={{ fontSize: 11.5, color: '#94a3b8' }}>
+          Visual transitions are rendered directly on workflow nodes and animated edges to avoid log-centric UI clutter.
+        </Typography>
 
         {selectedDecision?.id ? (
           <Button href={`/decisions?id=${selectedDecision.id}`} size="small" sx={{ mt: 1.4, borderRadius: 1.2 }}>
@@ -572,7 +537,6 @@ function TradingPipelineGraph({
   llmStreamText,
   latestRiskEvent,
   latestExecutionEvent,
-  events,
   steps,
   onStepClick
 }: {
@@ -580,7 +544,6 @@ function TradingPipelineGraph({
   llmStreamText: string;
   latestRiskEvent: ProcessEvent | undefined;
   latestExecutionEvent: ProcessEvent | undefined;
-  events: ProcessEvent[];
   steps: WorkflowStep[];
   onStepClick: (step: WorkflowStep) => void;
 }) {
@@ -602,11 +565,23 @@ function TradingPipelineGraph({
   return (
     <GlassPanel sx={{ p: 1.5 }}>
       <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Real-time AI decision workflow</Typography>
-      <Stack direction="row" spacing={0.7} sx={{ mb: 1.1, overflowX: 'auto' }}>
+      <Stack direction="row" spacing={0.7} sx={{ mb: 1.1, overflowX: 'auto', flexWrap: 'wrap' }}>
         {steps.map((step, idx) => (
-          <Button key={step.id} size="small" onClick={() => onStepClick(step)} sx={{ minWidth: 0, px: 1, border: `1px solid ${alpha(step.status === 'processing' ? '#22c55e' : '#64748b', 0.45)}` }}>
-            {idx + 1}. {step.title}
-          </Button>
+          <Box
+            key={step.id}
+            onClick={() => onStepClick(step)}
+            sx={{
+              minWidth: 110,
+              px: 1,
+              py: 0.8,
+              borderRadius: 1.2,
+              cursor: 'pointer',
+              border: `1px solid ${alpha(step.status === 'processing' ? '#22c55e' : '#64748b', 0.45)}`,
+              bgcolor: alpha('#0f172a', 0.48)
+            }}
+          >
+            <Typography sx={{ fontSize: 11.5, color: '#cbd5e1' }}>{idx + 1}. {step.title}</Typography>
+          </Box>
         ))}
       </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 240px 170px 170px' }, gap: 1, alignItems: 'center' }}>
@@ -638,32 +613,11 @@ function TradingPipelineGraph({
         ))}
       </Stack>
 
-      <Box sx={{ p: 1, borderRadius: 1.2, bgcolor: alpha('#0b1220', 0.6), border: '1px solid rgba(148,163,184,0.18)' }}>
-        <Typography sx={{ fontSize: 11.5, color: '#8da0bb', mb: 0.7 }}>Activity log / Event feed</Typography>
-        <Stack spacing={0.55} sx={{ maxHeight: 132, overflowY: 'auto' }}>
-          {events.map((event, index) => (
-            <Typography key={`${event.timestamp || index}-${event.type || 'evt'}`} sx={{ fontSize: 11.5, color: '#cbd5e1' }}>
-              {(event.type || 'EVENT').split('_').join(' ')}: {event.reason || event.action || String(event.status || event.node || 'update')}
-            </Typography>
-          ))}
-          {!events.length ? <Typography sx={{ fontSize: 11.5, color: '#64748b' }}>No events yet.</Typography> : null}
-        </Stack>
-      </Box>
+      <Typography sx={{ fontSize: 11.5, color: '#8da0bb' }}>
+        The canvas emphasizes state transitions and loop flow instead of console-style activity logs.
+      </Typography>
     </GlassPanel>
   );
-}
-
-function resolveSeverity(event: ProcessEvent) {
-  if (event.errors || event.type?.includes('REJECTED')) return 'HIGH';
-  if (event.type?.includes('RISK') || event.status === 'PROCESSING') return 'MEDIUM';
-  return 'INFO';
-}
-
-function resolveSeverityColor(event: ProcessEvent) {
-  const severity = resolveSeverity(event);
-  if (severity === 'HIGH') return '#ef4444';
-  if (severity === 'MEDIUM') return '#f59e0b';
-  return '#38bdf8';
 }
 
 function PipelineNode({

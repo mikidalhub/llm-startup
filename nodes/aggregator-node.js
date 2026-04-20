@@ -179,49 +179,75 @@ const emitFallback = (emit, reason) => {
 };
 
 export const runAggregatorNode = async (state, emit, context = {}) => {
-  const { llm, fetchFn = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = context;
+  const { llm, fetchFn = fetch, timeoutMs = REQUEST_TIMEOUT_MS, llmCache = null } = context;
   if (llm?.provider !== 'ollama' || !llm?.url) {
     return conservativeFallback(state, 'Ollama unavailable; conservative HOLD fallback.');
   }
 
   const payload = buildPromptPayload(state);
+  const cacheKey = llmCache?.makeKey?.({
+    promptTemplate: AGGREGATOR_SYSTEM_PROMPT,
+    contextSnapshot: { payload, model: llm.model, symbol: state.symbol }
+  });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const executeRequest = async () => {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const response = await fetchFn(llm.url, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: llm.model,
-        stream: true,
-        messages: [
-          { role: 'system', content: AGGREGATOR_SYSTEM_PROMPT },
-          { role: 'user', content: JSON.stringify(payload) }
-        ]
-      })
-    });
+    try {
+      const response = await fetchFn(llm.url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: llm.model,
+          stream: true,
+          messages: [
+            { role: 'system', content: AGGREGATOR_SYSTEM_PROMPT },
+            { role: 'user', content: JSON.stringify(payload) }
+          ]
+        })
+      });
 
-    if (!response.ok) {
-      throw new Error(`Aggregator request failed (${response.status})`);
+      if (!response.ok) {
+        throw new Error(`Aggregator request failed (${response.status})`);
+      }
+
+      const raw = await readOllamaStream({ response, emit });
+      const parsed = parseJsonBlock(raw);
+      const normalized = normalizeDecision(parsed);
+
+      if (!normalized) {
+        throw new Error('Aggregator returned non-compliant JSON decision payload.');
+      }
+
+      const latencyMs = Date.now() - startedAt;
+      const promptTokens = Math.ceil((AGGREGATOR_SYSTEM_PROMPT.length + JSON.stringify(payload).length) / 4);
+      const completionTokens = Math.ceil(raw.length / 4);
+      const estimatedUsd = Number((((promptTokens * 0.0000005) + (completionTokens * 0.0000015))).toFixed(6));
+      llmCache?.trackCost?.({
+        strategy: 'aggregator',
+        promptTokens,
+        completionTokens,
+        estimatedUsd
+      });
+      const metadata = { latencyMs, promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, estimatedUsd };
+      const responsePayload = { ...normalized, metadata, cache: { hit: false } };
+      if (cacheKey) await llmCache?.set?.(cacheKey, responsePayload, metadata);
+      return responsePayload;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      emitFallback(emit, reason);
+      return conservativeFallback(state, `Aggregator failed validation: ${reason}`);
+    } finally {
+      clearTimeout(timeout);
     }
+  };
 
-    const raw = await readOllamaStream({ response, emit });
-    const parsed = parseJsonBlock(raw);
-    const normalized = normalizeDecision(parsed);
-
-    if (!normalized) {
-      throw new Error('Aggregator returned non-compliant JSON decision payload.');
-    }
-
-    return normalized;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    emitFallback(emit, reason);
-    return conservativeFallback(state, `Aggregator failed validation: ${reason}`);
-  } finally {
-    clearTimeout(timeout);
+  if (!cacheKey || !llmCache) {
+    return executeRequest();
   }
+
+  return llmCache.dedupe(cacheKey, executeRequest);
 };
