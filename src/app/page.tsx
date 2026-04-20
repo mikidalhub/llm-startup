@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -96,6 +96,7 @@ export default function HomePage() {
   const [displayedEvents, setDisplayedEvents] = useState<ProcessEvent[]>([]);
   const [tradeLimit, setTradeLimit] = useState(6);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+  const lastDisplayedEventKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const hydrate = async () => {
@@ -160,16 +161,30 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
+  const getEventKey = (event: ProcessEvent) =>
+    `${event.timestamp || ''}|${event.type || ''}|${event.node || ''}|${event.status || ''}|${event.symbol || ''}|${event.action || ''}|${event.reason || ''}`;
+
   useEffect(() => {
     setDisplayedEvents([]);
+    lastDisplayedEventKeyRef.current = null;
   }, [filterDate]);
 
   useEffect(() => {
     if (!events.length) return;
     const timer = setInterval(() => {
       setDisplayedEvents((prev) => {
-        if (prev.length >= events.length) return prev;
-        return [...prev, events[prev.length]].slice(-60);
+        const nextIndex = (() => {
+          if (!lastDisplayedEventKeyRef.current) return 0;
+          const lastIndex = events.findIndex((event) => getEventKey(event) === lastDisplayedEventKeyRef.current);
+          if (lastIndex === -1) return Math.max(0, events.length - 1);
+          return lastIndex + 1;
+        })();
+
+        if (nextIndex >= events.length) return prev;
+
+        const nextEvent = events[nextIndex];
+        lastDisplayedEventKeyRef.current = getEventKey(nextEvent);
+        return [...prev, nextEvent].slice(-60);
       });
     }, 700);
     return () => clearInterval(timer);
