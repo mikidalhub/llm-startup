@@ -36,6 +36,9 @@ type EngineState = {
 type ProcessEvent = {
   timestamp?: string;
   type?: string;
+  node?: string;
+  status?: 'START' | 'PROCESSING' | 'DONE' | string;
+  payload?: Record<string, unknown>;
   symbol?: string;
   price?: number;
   rsi?: number;
@@ -76,6 +79,7 @@ export default function HomePage() {
   const [showPipeline, setShowPipeline] = useState(false);
   const [filterDate, setFilterDate] = useState('');
   const [isTriggering, setIsTriggering] = useState(false);
+  const [llmStreamText, setLlmStreamText] = useState('');
 
   useEffect(() => {
     const hydrate = async () => {
@@ -118,7 +122,14 @@ export default function HomePage() {
       });
       stream.addEventListener('process', (raw) => {
         try {
-          setEvents((prev) => [...prev, JSON.parse((raw as MessageEvent).data) as ProcessEvent].slice(-150));
+          const parsed = JSON.parse((raw as MessageEvent).data) as ProcessEvent;
+          setEvents((prev) => [...prev, parsed].slice(-220));
+          if (parsed.type === 'LLM_STREAM') {
+            const token = String((parsed.payload?.token as string) || '');
+            if (token) {
+              setLlmStreamText((prev) => `${prev}${token}`.slice(-1500));
+            }
+          }
         } catch {
           // ignore malformed event
         }
@@ -166,6 +177,24 @@ export default function HomePage() {
       .filter((trade) => trade.symbol === selectedTrade.symbol && trade.action === selectedTrade.action)
       .slice(-4);
   }, [results.trades, selectedTrade]);
+
+  const graphNodes = ['DATA', 'TECHNICAL_AGENT', 'FUNDAMENTAL_AGENT', 'SENTIMENT_AGENT', 'AGGREGATOR', 'RISK', 'EXECUTION'] as const;
+  const graphStatus = useMemo(() => {
+    const statusMap = Object.fromEntries(graphNodes.map((node) => [node, 'idle'])) as Record<string, string>;
+    for (const event of events) {
+      if (!event.node) continue;
+      statusMap[event.node] = event.status?.toLowerCase?.() || 'done';
+    }
+    return statusMap;
+  }, [events]);
+  const latestRiskEvent = useMemo(
+    () => [...events].reverse().find((item) => ['RISK_APPROVED', 'RISK_REJECTED', 'RISK_MODIFIED'].includes(String(item.type))),
+    [events]
+  );
+  const latestExecutionEvent = useMemo(
+    () => [...events].reverse().find((item) => item.type === 'EXECUTION_RESULT'),
+    [events]
+  );
 
 
   const triggerManualRun = async () => {
@@ -332,25 +361,55 @@ export default function HomePage() {
 
         <Collapse in={showPipeline}>
           <Stack spacing={0.8} sx={{ mt: 1 }}>
-            {['Analyst', 'Debate', 'Trader', 'Risk'].map((step, index) => (
-              <Box key={step} sx={{ p: 1, borderRadius: 1.4, bgcolor: alpha('#0f172a', 0.55), border: '1px solid rgba(148,163,184,0.15)' }}>
+            {graphNodes.map((step) => (
+              <Box
+                key={step}
+                sx={{
+                  p: 1,
+                  borderRadius: 1.4,
+                  bgcolor: alpha('#0f172a', graphStatus[step] === 'processing' ? 0.85 : 0.55),
+                  border: `1px solid ${graphStatus[step] === 'processing' ? 'rgba(34,197,94,0.55)' : 'rgba(148,163,184,0.15)'}`
+                }}
+              >
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography sx={{ fontSize: 12.5 }}>{step}</Typography>
-                  <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>{index < 2 ? 'Reasoning' : 'Execution'}</Typography>
+                  <Typography sx={{ fontSize: 11, color: '#8da0bb' }}>{graphStatus[step]}</Typography>
                 </Stack>
-                <LinearProgress sx={{ mt: 0.8, borderRadius: 1, bgcolor: 'rgba(30,41,59,0.6)' }} variant="determinate" value={68 + index * 8} />
+                <LinearProgress
+                  sx={{ mt: 0.8, borderRadius: 1, bgcolor: 'rgba(30,41,59,0.6)' }}
+                  variant="determinate"
+                  value={graphStatus[step] === 'done' ? 100 : graphStatus[step] === 'processing' ? 66 : graphStatus[step] === 'start' ? 32 : 8}
+                />
               </Box>
             ))}
           </Stack>
         </Collapse>
 
         <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>LLM streaming panel</Typography>
+        <Box sx={{ p: 1, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56), maxHeight: 110, overflowY: 'auto' }}>
+          <Typography sx={{ fontSize: 11.5, color: '#94a3b8', whiteSpace: 'pre-wrap' }}>{llmStreamText || 'No tokens streamed yet (fallback or idle).'}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Decision + risk panel</Typography>
+        <Row label="Risk result" value={String(latestRiskEvent?.type || 'n/a')} />
+        <Row label="Risk note" value={String((latestRiskEvent?.payload?.risk_reason as string) || (latestRiskEvent?.payload?.reason as string) || 'No override.')} />
+        <Row label="Final action" value={String((latestRiskEvent?.payload?.action as string) || selectedTrade?.action || 'HOLD')} />
+
+        <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
+        <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Execution log</Typography>
+        <Box sx={{ p: 1, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56), maxHeight: 110, overflowY: 'auto' }}>
+          <Typography sx={{ fontSize: 11.5, color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>{latestExecutionEvent ? JSON.stringify(latestExecutionEvent.payload || {}, null, 2) : 'No execution event yet.'}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1.6, borderColor: 'rgba(148,163,184,0.15)' }} />
         <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 0.6 }}>Live process log</Typography>
         <Stack spacing={0.7} sx={{ maxHeight: '38vh', overflowY: 'auto' }}>
           {events.slice(-18).reverse().map((event, index) => (
             <Box key={`${event.timestamp || index}-${event.type || 'event'}`} sx={{ p: 0.9, borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.56) }}>
-              <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}</Typography>
-              <Typography sx={{ fontSize: 12 }}>{event.symbol ? `${event.symbol} · ` : ''}{event.reason || event.action || 'state update'}</Typography>
+              <Typography sx={{ fontSize: 11, color: '#7dd3fc' }}>{event.type || 'event'}{event.node ? ` · ${event.node}` : ''}</Typography>
+              <Typography sx={{ fontSize: 12 }}>{event.symbol ? `${event.symbol} · ` : ''}{event.reason || event.action || (event.status ? `status: ${event.status}` : 'state update')}</Typography>
             </Box>
           ))}
         </Stack>

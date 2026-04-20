@@ -13,6 +13,7 @@ const mockState = {
 };
 
 const buildMockEngine = () => ({
+  config: { outputPath: './tmp-unit-results.json' },
   getState: () => mockState,
   onUpdate: () => () => {},
   tick: () => {}
