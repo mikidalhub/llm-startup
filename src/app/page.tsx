@@ -82,11 +82,9 @@ type HomeDashboardCache = {
   decisions: Decision[];
   events: ProcessEvent[];
   stocks: StockSummary[];
-  fetchedAt: number;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
-const HOME_CACHE_TTL_MS = 30_000;
 const HOME_SESSION_KEY = 'home-dashboard-cache-v1';
 let homeDashboardCache: HomeDashboardCache | null = null;
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -112,8 +110,9 @@ export default function HomePage() {
   const [llmStreamText, setLlmStreamText] = useState('');
   const [tradeLimit, setTradeLimit] = useState(6);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
-  const [uiMode, setUiMode] = useState<'light' | 'dark'>('light');
+  const [uiMode, setUiMode] = useState<'light' | 'dark'>('dark');
   const [stocks, setStocks] = useState<StockSummary[]>([]);
+  const [isSseConnected, setIsSseConnected] = useState(false);
   const hasHydratedFromCache = useRef(false);
 
   useEffect(() => {
@@ -130,7 +129,7 @@ export default function HomePage() {
         const serialized = window.sessionStorage.getItem(HOME_SESSION_KEY);
         if (serialized) {
           const parsed = JSON.parse(serialized) as HomeDashboardCache;
-          if (parsed?.fetchedAt) {
+          if (parsed?.state) {
             homeDashboardCache = parsed;
             setEngineState(parsed.state);
             setResults(parsed.results);
@@ -146,7 +145,7 @@ export default function HomePage() {
     }
 
     const hydrate = async (force = false) => {
-      if (!force && homeDashboardCache && Date.now() - homeDashboardCache.fetchedAt < HOME_CACHE_TTL_MS) return;
+      if (!force && hasHydratedFromCache.current) return;
       try {
         const bootstrapRes = await fetch(`${API_BASE}/api/bootstrap`);
         if (bootstrapRes.ok) {
@@ -171,46 +170,14 @@ export default function HomePage() {
             results: nextResults,
             decisions: nextDecisions,
             events: nextEvents,
-            stocks: nextStocks,
-            fetchedAt: Date.now()
+            stocks: nextStocks
           };
           homeDashboardCache = cachedPayload;
           if (typeof window !== 'undefined') {
             window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(cachedPayload));
           }
+          hasHydratedFromCache.current = true;
           return;
-        }
-
-        const [stateRes, resultsRes, decisionsRes, stocksRes] = await Promise.all([
-          fetch(`${API_BASE}/api/state`),
-          fetch(`${API_BASE}/api/results`),
-          fetch(`${API_BASE}/api/decisions`),
-          fetch(`${API_BASE}/api/stocks`)
-        ]);
-
-        const nextState = stateRes.ok ? await stateRes.json() : {};
-        const nextResults = resultsRes.ok ? await resultsRes.json() : { trades: [], signals: [] };
-        const nextDecisions = decisionsRes.ok ? await decisionsRes.json() : [];
-        setEngineState(nextState);
-        setResults(nextResults);
-        setDecisions(nextDecisions);
-        let nextStocks: StockSummary[] = [];
-        if (stocksRes.ok) {
-          const stockPayload = await stocksRes.json();
-          nextStocks = (stockPayload?.details || []).slice(0, 7);
-          setStocks(nextStocks);
-        }
-        const cachedPayload = {
-          state: nextState,
-          results: nextResults,
-          decisions: nextDecisions,
-          events,
-          stocks: nextStocks,
-          fetchedAt: Date.now()
-        };
-        homeDashboardCache = cachedPayload;
-        if (typeof window !== 'undefined') {
-          window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(cachedPayload));
         }
       } catch {
         // offline preview
@@ -218,54 +185,86 @@ export default function HomePage() {
     };
 
     void hydrate(!hasHydratedFromCache.current);
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      void hydrate();
-    }, 10000);
 
     if (typeof window !== 'undefined') {
-      const stream = new EventSource(`${API_BASE}/events`);
-      stream.addEventListener('state', (raw) => {
-        try {
-          const nextState = JSON.parse((raw as MessageEvent).data) as EngineState;
-          setEngineState(nextState);
-          if (homeDashboardCache) {
-            homeDashboardCache = { ...homeDashboardCache, state: nextState, fetchedAt: Date.now() };
-            window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(homeDashboardCache));
-          }
-        } catch {
-          // ignore malformed event
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let reconnectAttempt = 0;
+      let stream: EventSource | null = null;
+      let isUnmounted = false;
+
+      const scheduleReconnect = () => {
+        if (isUnmounted) return;
+        const maxDelayMs = 48_000;
+        const delayMs = Math.min(3_000 * (2 ** reconnectAttempt), maxDelayMs);
+        reconnectAttempt += 1;
+        reconnectTimer = setTimeout(() => {
+          connectStream();
+        }, delayMs);
+        console.warn(`[SSE] connection lost. Reconnecting in ${delayMs}ms (attempt ${reconnectAttempt}).`);
+      };
+
+      const connectStream = () => {
+        if (isUnmounted) return;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
         }
-      });
-      stream.addEventListener('process', (raw) => {
-        try {
-          const parsed = JSON.parse((raw as MessageEvent).data) as ProcessEvent;
-          setEvents((prev) => {
-            const next = [...prev, parsed].slice(-220);
+        stream = new EventSource(`${API_BASE}/events`);
+        stream.addEventListener('open', () => {
+          reconnectAttempt = 0;
+          setIsSseConnected(true);
+        });
+        stream.addEventListener('state', (raw) => {
+          try {
+            const nextState = JSON.parse((raw as MessageEvent).data) as EngineState;
+            setEngineState(nextState);
             if (homeDashboardCache) {
-              homeDashboardCache = { ...homeDashboardCache, events: next, fetchedAt: Date.now() };
+              homeDashboardCache = { ...homeDashboardCache, state: nextState };
               window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(homeDashboardCache));
             }
-            return next;
-          });
-          if (parsed.type === 'LLM_STREAM') {
-            const token = String((parsed.payload?.token as string) || '');
-            if (token) {
-              setLlmStreamText((prev) => `${prev}${token}`.slice(-1500));
-            }
+          } catch {
+            // ignore malformed event
           }
-        } catch {
-          // ignore malformed event
-        }
-      });
+        });
+        stream.addEventListener('process', (raw) => {
+          try {
+            const parsed = JSON.parse((raw as MessageEvent).data) as ProcessEvent;
+            setEvents((prev) => {
+              const next = [...prev, parsed].slice(-220);
+              if (homeDashboardCache) {
+                homeDashboardCache = { ...homeDashboardCache, events: next };
+                window.sessionStorage.setItem(HOME_SESSION_KEY, JSON.stringify(homeDashboardCache));
+              }
+              return next;
+            });
+            if (parsed.type === 'LLM_STREAM') {
+              const token = String((parsed.payload?.token as string) || '');
+              if (token) {
+                setLlmStreamText((prev) => `${prev}${token}`.slice(-1500));
+              }
+            }
+          } catch {
+            // ignore malformed event
+          }
+        });
+        stream.addEventListener('error', () => {
+          setIsSseConnected(false);
+          stream?.close();
+          scheduleReconnect();
+        });
+      };
+
+      connectStream();
 
       return () => {
-        clearInterval(interval);
-        stream.close();
+        isUnmounted = true;
+        setIsSseConnected(false);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        stream?.close();
       };
     }
 
-    return () => clearInterval(interval);
+    return undefined;
   }, []);
 
   const metrics = engineState.portfolio?.metrics || {};
@@ -395,12 +394,17 @@ export default function HomePage() {
             <Box>
               <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Data loading strategy</Typography>
               <Typography sx={{ fontSize: 12, color: '#cbd5e1' }}>
-                Home data is cached in session state to avoid repeated heavy requests when returning to this page.
+                One bootstrap fetch hydrates the page, then Server-Sent Events push all live updates in real time.
               </Typography>
             </Box>
-            <Tooltip title="The dashboard refreshes from cache first, then silently syncs in the background when needed.">
-              <Chip size="small" label="Reduced API load" sx={{ ...badgeSx, cursor: 'help' }} />
-            </Tooltip>
+            <Stack direction="row" spacing={0.8}>
+              <Tooltip title="Single source of truth for live updates.">
+                <Chip size="small" label="SSE only" sx={{ ...badgeSx, cursor: 'help' }} />
+              </Tooltip>
+              <Tooltip title={isSseConnected ? 'Connected to live event stream.' : 'Offline or reconnecting to event stream.'}>
+                <Chip size="small" label={isSseConnected ? 'Live stream online' : 'Live stream offline'} sx={{ ...badgeSx, cursor: 'help' }} />
+              </Tooltip>
+            </Stack>
           </Stack>
           <Typography sx={{ mt: 0.8, fontSize: 11, color: '#64748b' }}>
             Trading cadence: once per day (scheduled by backend) or manually with the Run trading now button.
@@ -430,13 +434,6 @@ export default function HomePage() {
           activeStepId={activeWorkflowStepId}
           onStepClick={setSelectedStep}
         />
-
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
-          <GlassPanel sx={{ flex: 1, minHeight: 250 }}>
-            <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Equity curve</Typography>
-            <EquityCurve points={equityCurve} />
-          </GlassPanel>
-        </Stack>
 
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2}>
           <GlassPanel sx={{ flex: 1 }}>
@@ -703,32 +700,45 @@ function TradingPipelineGraph({
   const getStepById = (id: string) => steps.find((step) => step.id === id);
   const isActive = (node: string) => ['start', 'processing'].includes(nodeState(node));
   const isDone = (node: string) => nodeState(node) === 'done';
-  const lineColor = (node: string) => (isDone(node) ? alpha(nodeTone[node], 0.7) : isActive(node) ? alpha(nodeTone[node], 0.95) : alpha('#64748b', 0.24));
+  const isAnyActive = (nodes: string[]) => nodes.some((node) => isActive(node));
+  const isAnyDone = (nodes: string[]) => nodes.some((node) => isDone(node));
+  const flowState = (nodes: string[]) => (isAnyActive(nodes) ? 'active' : isAnyDone(nodes) ? 'done' : 'idle');
 
   return (
-    <GlassPanel sx={{ p: 1.5 }}>
-      <Typography sx={{ fontSize: 12, color: '#8da0bb', mb: 1 }}>Real-time AI decision workflow</Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 240px 170px 170px' }, gap: 1, alignItems: 'center' }}>
+    <GlassPanel sx={{ p: 1.6 }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'center' }} sx={{ mb: 1.2 }}>
+        <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Real-time AI decision workflow</Typography>
+        <Stack direction="row" spacing={0.8}>
+          <Chip size="small" label={`Active phase: ${activeStepId || 'IDLE'}`} sx={badgeSx} />
+          <Chip size="small" label="SSE event-driven" sx={badgeSx} />
+        </Stack>
+      </Stack>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 28px 1fr 28px 240px 28px 170px 28px 170px' }, gap: 1, alignItems: 'center' }}>
         <PipelineNode title="DATA COLLECTION" subtitle="Fetching market data..." state={nodeState('DATA')} tone={nodeTone.DATA} onClick={() => { const step = getStepById('DATA'); if (step) onStepClick(step); }} />
-        <Box sx={{ display: 'grid', gap: 0.8 }}>
+        <PipelineConnector state={flowState(['DATA', 'TECHNICAL_AGENT', 'FUNDAMENTAL_AGENT', 'SENTIMENT_AGENT'])} />
+        <Box sx={{ display: 'grid', gap: 0.8, p: 0.8, border: '1px solid rgba(148,163,184,0.16)', borderRadius: 1.6, bgcolor: alpha('#020617', 0.35) }}>
+          <Typography sx={{ fontSize: 10.5, letterSpacing: '0.08em', color: '#8da0bb' }}>PARALLEL AGENTS</Typography>
           <PipelineNode title="TECHNICAL ANALYSIS" subtitle="Analyzing charts..." state={nodeState('TECHNICAL_AGENT')} tone={nodeTone.TECHNICAL_AGENT} compact onClick={() => { const step = getStepById('TECHNICAL_AGENT'); if (step) onStepClick(step); }} />
           <PipelineNode title="FUNDAMENTAL ANALYSIS" subtitle="Evaluating reports..." state={nodeState('FUNDAMENTAL_AGENT')} tone={nodeTone.FUNDAMENTAL_AGENT} compact onClick={() => { const step = getStepById('FUNDAMENTAL_AGENT'); if (step) onStepClick(step); }} />
           <PipelineNode title="SENTIMENT ANALYSIS" subtitle="Assessing news..." state={nodeState('SENTIMENT_AGENT')} tone={nodeTone.SENTIMENT_AGENT} compact onClick={() => { const step = getStepById('SENTIMENT_AGENT'); if (step) onStepClick(step); }} />
         </Box>
+        <PipelineConnector state={flowState(['TECHNICAL_AGENT', 'FUNDAMENTAL_AGENT', 'SENTIMENT_AGENT', 'AGGREGATOR'])} />
         <PipelineNode title="LLM AGGREGATOR" subtitle="Generating decision..." state={nodeState('AGGREGATOR')} tone={nodeTone.AGGREGATOR} focus extra={llmStreamText ? llmStreamText.slice(-110) : 'thinking…'} onClick={() => { const step = getStepById('AGGREGATOR'); if (step) onStepClick(step); }} />
+        <PipelineConnector state={flowState(['AGGREGATOR', 'RISK'])} />
         <PipelineNode title="RISK" subtitle="Checking limits..." state={nodeState('RISK')} tone={nodeTone.RISK} extra={String(latestRiskEvent?.type || 'awaiting')} onClick={() => { const step = getStepById('RISK'); if (step) onStepClick(step); }} />
+        <PipelineConnector state={flowState(['RISK', 'EXECUTION'])} />
         <PipelineNode title="EXECUTION" subtitle="Executing order..." state={nodeState('EXECUTION')} tone={nodeTone.EXECUTION} extra={latestExecutionEvent ? 'trade sent' : 'queueing'} onClick={() => { const step = getStepById('EXECUTION'); if (step) onStepClick(step); }} />
       </Box>
 
-      <Stack direction="row" spacing={0.8} sx={{ my: 1.2, overflowX: 'auto' }}>
+      <Stack direction="row" spacing={0.8} sx={{ mt: 1.2, overflowX: 'auto' }}>
         {['DATA', 'TECHNICAL_AGENT', 'FUNDAMENTAL_AGENT', 'SENTIMENT_AGENT', 'AGGREGATOR', 'RISK', 'EXECUTION'].map((node) => (
           <Box
             key={`flow-${node}`}
             sx={{
-              height: 4,
-              minWidth: 100,
+              height: 5,
+              minWidth: 112,
               borderRadius: 2,
-              bgcolor: node === activeStepId ? lineColor(node) : alpha('#64748b', 0.18),
+              bgcolor: node === activeStepId ? alpha(nodeTone[node], 0.72) : alpha('#64748b', 0.18),
               backgroundImage: `linear-gradient(90deg, transparent 0%, ${alpha('#e2e8f0', 0.85)} 50%, transparent 100%)`,
               backgroundSize: '160px 100%',
               animation: isActive(node) && node === activeStepId ? `${flowAnim} 1.2s linear infinite` : 'none'
@@ -738,9 +748,26 @@ function TradingPipelineGraph({
       </Stack>
 
       <Typography sx={{ fontSize: 11.5, color: '#8da0bb' }}>
-        The canvas emphasizes state transitions and loop flow instead of console-style activity logs.
+        Clear handoff lines map each step from data ingestion to execution for easier operational tracing.
       </Typography>
     </GlassPanel>
+  );
+}
+
+function PipelineConnector({ state }: { state: 'idle' | 'active' | 'done' }) {
+  return (
+    <Box
+      sx={{
+        display: { xs: 'none', lg: 'block' },
+        height: 3,
+        borderRadius: 2,
+        bgcolor: state === 'done' ? alpha('#22d3ee', 0.62) : state === 'active' ? alpha('#38bdf8', 0.82) : alpha('#64748b', 0.22),
+        border: `1px solid ${state === 'active' ? alpha('#7dd3fc', 0.9) : alpha('#94a3b8', 0.28)}`,
+        backgroundImage: state === 'active' ? `linear-gradient(90deg, transparent 0%, ${alpha('#e2e8f0', 0.95)} 50%, transparent 100%)` : 'none',
+        backgroundSize: '160px 100%',
+        animation: state === 'active' ? `${flowAnim} 1.2s linear infinite` : 'none'
+      }}
+    />
   );
 }
 
@@ -847,43 +874,6 @@ function DateBadge({ date }: { date: Date }) {
       <Box sx={{ bgcolor: '#dbeafe', color: '#1e40af', px: 1, py: 0.4 }}>
         <Typography sx={{ fontSize: 12, letterSpacing: '0.04em', fontWeight: 700, textAlign: 'center' }}>{monthYear}</Typography>
       </Box>
-    </Box>
-  );
-}
-
-function EquityCurve({ points }: { points: Array<{ ts: string; value: number }> }) {
-  if (!points.length) return <Typography sx={{ fontSize: 12, color: '#64748b' }}>No equity history yet.</Typography>;
-
-  const values = points.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = Math.max(1, max - min);
-
-  const width = 760;
-  const height = 170;
-  const path = points
-    .map((point, index) => {
-      const x = (index / Math.max(1, points.length - 1)) * (width - 22) + 11;
-      const y = height - (((point.value - min) / spread) * (height - 20) + 10);
-      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-    })
-    .join(' ');
-
-  return (
-    <Box>
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="170" role="img" aria-label="equity curve">
-        <defs>
-          <linearGradient id="eq" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.75" />
-            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.1" />
-          </linearGradient>
-        </defs>
-        <path d={path} fill="none" stroke="url(#eq)" strokeWidth="2.2" strokeLinecap="round" />
-      </svg>
-      <Stack direction="row" justifyContent="space-between">
-        <Typography sx={{ fontSize: 11, color: '#64748b' }}>{new Date(points[0].ts).toLocaleTimeString()}</Typography>
-        <Typography sx={{ fontSize: 11, color: '#64748b' }}>{new Date(points.at(-1)!.ts).toLocaleTimeString()}</Typography>
-      </Stack>
     </Box>
   );
 }
