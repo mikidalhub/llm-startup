@@ -7,3 +7,6 @@ npm-debug.log*
 results.json
 public/sw.js
 public/workbox-*.js
+
+# TradeFlow AI local artifacts
+trade_journal.db
