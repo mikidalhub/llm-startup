@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Stack, Typography } from '@mui/material';
+import { Box, Button, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
@@ -13,6 +13,7 @@ type StockDetail = {
   sector?: string;
   description?: string;
   history?: Array<{ ts: string; close: number }>;
+  totalTrades?: number;
 };
 
 const formatUsd = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -29,6 +30,7 @@ export default function StockDetailPage() {
 
   useEffect(() => {
     const fetchDetail = async () => {
+      setError('');
       try {
         const res = await fetch(`${API_BASE}/api/stocks/${symbol}`);
         if (!res.ok) throw new Error('Unable to load stock detail.');
@@ -57,22 +59,41 @@ export default function StockDetailPage() {
   }, [history]);
 
   return (
-    <Box sx={{ minHeight: '100vh', p: 3, bgcolor: '#f1f5f9' }}>
-      <Stack spacing={1.4} sx={{ maxWidth: 920, mx: 'auto' }}>
+    <Box sx={{ minHeight: '100vh', p: { xs: 2, md: 4 }, bgcolor: '#f7f9fc' }}>
+      <Stack spacing={2} sx={{ maxWidth: 920, mx: 'auto' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography sx={{ fontSize: 28, fontWeight: 300 }}>{detail?.symbol || symbol}</Typography>
-          <Button component={Link} href="/" variant="outlined">Back</Button>
+          <Box>
+            <Typography sx={{ fontSize: 32, fontWeight: 300 }}>{detail?.symbol || symbol}</Typography>
+            <Typography sx={{ color: '#64748b' }}>{detail?.name || 'Loading name...'}</Typography>
+          </Box>
+          <Stack direction="row" spacing={1}>
+            <Button component={Link} href="/" variant="outlined">Back</Button>
+            <Button component={Link} href="/stocks?symbol=MSFT" variant="text">MSFT</Button>
+            <Button component={Link} href="/stocks?symbol=NVDA" variant="text">NVDA</Button>
+          </Stack>
         </Stack>
-        <Typography sx={{ fontSize: 15, color: '#334155' }}>{detail?.name || 'Loading name...'}</Typography>
-        <Typography sx={{ fontSize: 22, color: '#0f766e' }}>{formatUsd(detail?.currentPrice || 0)}</Typography>
-        <Typography sx={{ fontSize: 14, color: '#475569' }}>{detail?.description || error || 'Loading...'}</Typography>
 
-        <Box sx={{ p: 2, bgcolor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 2 }}>
-          <Typography sx={{ fontSize: 13, color: '#475569', mb: 1 }}>Price history (1 month)</Typography>
-          <svg viewBox="0 0 100 100" width="100%" height="260" preserveAspectRatio="none" role="img" aria-label="Stock history chart">
-            <polyline points={chartPoints} fill="none" stroke="#2563eb" strokeWidth="2.4" />
-          </svg>
-        </Box>
+        <Card variant="outlined">
+          <CardContent>
+            <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1}>
+              <Typography sx={{ fontSize: 26, color: '#0f766e' }}>{formatUsd(detail?.currentPrice || 0)}</Typography>
+              <Stack direction="row" spacing={1}>
+                <Chip label={detail?.sector || 'Unknown sector'} />
+                <Chip label={`${detail?.totalTrades || 0} trades`} variant="outlined" />
+              </Stack>
+            </Stack>
+            <Typography sx={{ mt: 1, color: '#334155' }}>{detail?.description || error || 'Loading...'}</Typography>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography sx={{ fontSize: 13, color: '#64748b', mb: 1 }}>Price history (1 month from backend)</Typography>
+            <svg viewBox="0 0 100 100" width="100%" height="250" preserveAspectRatio="none" role="img" aria-label="Stock history chart">
+              <polyline points={chartPoints} fill="none" stroke="#2563eb" strokeWidth="2.4" />
+            </svg>
+          </CardContent>
+        </Card>
       </Stack>
     </Box>
   );

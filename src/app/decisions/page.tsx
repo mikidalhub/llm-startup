@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Box, Chip, Stack, Typography, alpha } from '@mui/material';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { Box, Button, Card, CardContent, Chip, Divider, Grid, Stack, Typography } from '@mui/material';
 
 type Decision = {
   id?: number | string;
@@ -26,6 +27,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_A
 export default function DecisionsPage() {
   const [id, setId] = useState<string | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
+  const [all, setAll] = useState<Decision[]>([]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -34,54 +36,101 @@ export default function DecisionsPage() {
   }, []);
 
   useEffect(() => {
-    const run = async () => {
-      if (!id) return;
+    const load = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/decisions/${id}`);
-        if (!res.ok) return;
-        setDecision(await res.json());
+        const listRes = await fetch(`${API_BASE}/api/decisions`);
+        if (listRes.ok) {
+          const payload = await listRes.json() as Decision[];
+          setAll(payload.slice(0, 40));
+        }
+
+        if (id) {
+          const detailRes = await fetch(`${API_BASE}/api/decisions/${id}`);
+          if (detailRes.ok) setDecision(await detailRes.json() as Decision);
+        } else {
+          setDecision(null);
+        }
       } catch {
-        // offline preview
+        // ignore offline mode
       }
     };
 
-    void run();
+    void load();
   }, [id]);
 
+  const selected = useMemo(() => {
+    if (decision) return decision;
+    if (!id) return null;
+    return all.find((item) => String(item.id) === String(id)) || null;
+  }, [all, decision, id]);
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#030508', color: '#e2e8f0', p: 2.5 }}>
-      <Typography sx={{ fontSize: 11, letterSpacing: '0.2em', color: '#7c8ca3' }}>DECISION RECORD</Typography>
-      <Typography sx={{ fontSize: 30, fontWeight: 300, mt: 0.4 }}>Decision #{id || '—'}</Typography>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f7f9fc', p: { xs: 2, md: 4 } }}>
+      <Stack spacing={2.5} sx={{ maxWidth: 1080, mx: 'auto' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Box>
+            <Typography sx={{ fontSize: 30, fontWeight: 300 }}>Decisions</Typography>
+            <Typography sx={{ color: '#64748b' }}>Decision feed and a backend-backed detail panel.</Typography>
+          </Box>
+          <Button component={Link} href="/" variant="outlined">Back</Button>
+        </Stack>
 
-      <Box sx={{ mt: 1.8, p: 1.4, borderRadius: 1.8, bgcolor: alpha('#0f172a', 0.48), border: '1px solid rgba(148,163,184,0.2)' }}>
-        {!id ? (
-          <Typography sx={{ color: '#94a3b8' }}>Choose a decision from the home page to inspect full reasoning and outcome.</Typography>
-        ) : !decision ? (
-          <Typography sx={{ color: '#94a3b8' }}>Loading decision details…</Typography>
-        ) : (
-          <Stack spacing={1}>
-            <Stack direction="row" spacing={0.8}>
-              <Chip label={`Symbol ${decision.symbol || '-'}`} sx={{ borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.7), color: '#cbd5e1' }} />
-              <Chip label={`Action ${decision.action || '-'}`} sx={{ borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.7), color: '#cbd5e1' }} />
-              <Chip label={`Size ${(decision.sizePct || 0).toFixed(2)}`} sx={{ borderRadius: 1.2, bgcolor: alpha('#0f172a', 0.7), color: '#cbd5e1' }} />
-            </Stack>
-            <Typography sx={{ fontSize: 13, color: '#9fb1c8' }}>Reason: {decision.reason || 'No reason logged.'}</Typography>
-            <Typography sx={{ fontSize: 12, color: '#7c8ca3' }}>Created: {decision.ts ? new Date(decision.ts).toLocaleString() : 'n/a'}</Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={7}>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography sx={{ mb: 1, fontWeight: 500 }}>Recent records</Typography>
+                <Stack spacing={1.1}>
+                  {all.map((item) => (
+                    <Box key={String(item.id || `${item.symbol}-${item.ts}`)}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip size="small" label={`#${item.id || '-'}`} />
+                        <Chip size="small" label={item.symbol || '-'} />
+                        <Chip size="small" label={item.action || '-'} color="primary" variant="outlined" />
+                        <Typography sx={{ color: '#64748b', fontSize: 13 }}>{item.ts ? new Date(item.ts).toLocaleString() : '—'}</Typography>
+                        {item.id ? <Button size="small" href={`/decisions?id=${item.id}`}>Inspect</Button> : null}
+                      </Stack>
+                      <Typography sx={{ mt: 0.4, color: '#334155' }}>{item.reason || 'No reason provided.'}</Typography>
+                      <Divider sx={{ mt: 1 }} />
+                    </Box>
+                  ))}
+                  {!all.length ? <Typography sx={{ color: '#64748b' }}>No decisions available from backend.</Typography> : null}
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
 
-            <Box sx={{ p: 1.1, borderRadius: 1.3, bgcolor: alpha('#0b1220', 0.58), border: '1px solid rgba(148,163,184,0.15)' }}>
-              <Typography sx={{ fontSize: 12, color: '#8da0bb' }}>Outcome</Typography>
-              {decision.trade ? (
-                <Typography sx={{ fontSize: 12.8 }}>
-                  {decision.trade.action} · {decision.trade.status} · {decision.trade.shares?.toFixed(4)} @ {decision.trade.price}
-                </Typography>
-              ) : (
-                <Typography sx={{ fontSize: 12.8, color: '#94a3b8' }}>No linked trade found for this decision.</Typography>
-              )}
-            </Box>
-          </Stack>
-        )}
-      </Box>
+          <Grid item xs={12} md={5}>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography sx={{ mb: 1, fontWeight: 500 }}>Selected decision</Typography>
+                {!id ? <Typography sx={{ color: '#64748b' }}>Select any row to inspect a specific decision.</Typography> : null}
+                {id && !selected ? <Typography sx={{ color: '#64748b' }}>Decision #{id} not found.</Typography> : null}
+                {selected ? (
+                  <Stack spacing={1}>
+                    <Typography>ID: {selected.id || '—'}</Typography>
+                    <Typography>Symbol: {selected.symbol || '—'}</Typography>
+                    <Typography>Action: {selected.action || '—'}</Typography>
+                    <Typography>Size %: {(selected.sizePct || 0).toFixed(2)}</Typography>
+                    <Typography>Timestamp: {selected.ts ? new Date(selected.ts).toLocaleString() : '—'}</Typography>
+                    <Typography>Source: {selected.source || 'unknown'}</Typography>
+                    <Typography>Reason: {selected.reason || 'No reason provided.'}</Typography>
+                    <Divider />
+                    <Typography sx={{ fontWeight: 500 }}>Linked trade</Typography>
+                    {selected.trade ? (
+                      <Typography>
+                        {selected.trade.action} · {selected.trade.status} · {(selected.trade.shares || 0).toFixed(4)} @ {selected.trade.price || 0}
+                      </Typography>
+                    ) : (
+                      <Typography sx={{ color: '#64748b' }}>No linked trade.</Typography>
+                    )}
+                  </Stack>
+                ) : null}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </Stack>
     </Box>
   );
 }
