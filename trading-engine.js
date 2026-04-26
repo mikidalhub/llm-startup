@@ -97,6 +97,7 @@ export class TradingEngine {
     this.writeFileFn = dependencies.writeFileFn ?? writeFile;
     this.clock = dependencies.clock ?? (() => new Date().toISOString());
     this.redisStore = dependencies.redisStore ?? null;
+    this.mlflowManager = dependencies.mlflowManager ?? null;
 
     this.portfolio = {
       cash: config.capital,
@@ -549,6 +550,7 @@ export class TradingEngine {
           fetchFn: this.fetchFn,
           llmCache: this.llmCache,
           maxPositionPct: this.config.maxPositionPct,
+          mlflowManager: this.mlflowManager,
           executeTradeFn: (tradeSymbol, tradeSnapshot, riskDecision, tradeTs) =>
             Promise.resolve(this.executeTrade(tradeSymbol, tradeSnapshot, riskDecision, tradeTs))
         };
@@ -568,6 +570,7 @@ export class TradingEngine {
           confidence: Number(decision.confidence ?? 0),
           riskStatus: decision.risk_status || 'RISK_APPROVED',
           riskReason: decision.risk_reason || null,
+          mlflowRunId: orchestrated.aggregatedDecision?.mlflowRunId || null,
           graph: {
             technical: orchestrated.agentOutputs?.technical || null,
             fundamental: orchestrated.agentOutputs?.fundamental || null,
@@ -648,6 +651,7 @@ export class TradingEngine {
       lastError: this.lastError,
       status: this.status,
       llmCost: this.llmCache.getCostSummary(),
+      mlflow: { lastRunId: this.mlflowManager?.get_active_run_id?.() || null },
       schedule: {
         dailyRunAt: `${String(this.config.dailySchedule?.hour ?? 9).padStart(2, '0')}:${String(this.config.dailySchedule?.minute ?? 0).padStart(2, '0')}`,
         timezone: this.config.dailySchedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),

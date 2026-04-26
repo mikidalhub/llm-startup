@@ -168,6 +168,16 @@ const buildPromptPayload = (state) => {
   };
 };
 
+const emitOllamaState = (emit, status, payload = {}) => {
+  emit?.({
+    type: 'OLLAMA_STATE',
+    node: 'AGGREGATOR',
+    status,
+    payload,
+    timestamp: new Date().toISOString()
+  });
+};
+
 const emitFallback = (emit, reason) => {
   emit?.({
     type: 'AGGREGATOR_FALLBACK',
@@ -179,7 +189,7 @@ const emitFallback = (emit, reason) => {
 };
 
 export const runAggregatorNode = async (state, emit, context = {}) => {
-  const { llm, fetchFn = fetch, timeoutMs = REQUEST_TIMEOUT_MS, llmCache = null } = context;
+  const { llm, fetchFn = fetch, timeoutMs = REQUEST_TIMEOUT_MS, llmCache = null, mlflowManager = null } = context;
   if (llm?.provider !== 'ollama' || !llm?.url) {
     return conservativeFallback(state, 'Ollama unavailable; conservative HOLD fallback.');
   }
@@ -194,8 +204,15 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const userPrompt = JSON.stringify(payload);
+    const runId = await mlflowManager?.start_prompt_run?.({
+      endpointName: '/api/process/start',
+      userPrompt,
+      selectedModel: llm.model || ''
+    });
 
     try {
+      emitOllamaState(emit, 'REQUEST_STARTED', { model: llm.model, endpoint: llm.url, symbol: state.symbol });
       const response = await fetchFn(llm.url, {
         method: 'POST',
         signal: controller.signal,
@@ -205,7 +222,7 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
           stream: true,
           messages: [
             { role: 'system', content: AGGREGATOR_SYSTEM_PROMPT },
-            { role: 'user', content: JSON.stringify(payload) }
+            { role: 'user', content: userPrompt }
           ]
         })
       });
@@ -215,6 +232,7 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
       }
 
       const raw = await readOllamaStream({ response, emit });
+      emitOllamaState(emit, 'RESPONSE_STREAM_DONE', { chars: raw.length, symbol: state.symbol });
       const parsed = parseJsonBlock(raw);
       const normalized = normalizeDecision(parsed);
 
@@ -223,7 +241,7 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
       }
 
       const latencyMs = Date.now() - startedAt;
-      const promptTokens = Math.ceil((AGGREGATOR_SYSTEM_PROMPT.length + JSON.stringify(payload).length) / 4);
+      const promptTokens = Math.ceil((AGGREGATOR_SYSTEM_PROMPT.length + userPrompt.length) / 4);
       const completionTokens = Math.ceil(raw.length / 4);
       const estimatedUsd = Number((((promptTokens * 0.0000005) + (completionTokens * 0.0000015))).toFixed(6));
       llmCache?.trackCost?.({
@@ -233,15 +251,26 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
         estimatedUsd
       });
       const metadata = { latencyMs, promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, estimatedUsd };
-      const responsePayload = { ...normalized, metadata, cache: { hit: false } };
+      await mlflowManager?.log_prompt_response?.({
+        responseText: raw,
+        latencySeconds: Number((latencyMs / 1000).toFixed(6)),
+        runId
+      });
+      await mlflowManager?.log_prompt_success?.({ runId });
+      emitOllamaState(emit, 'RESPONSE_VALIDATED', { action: normalized.action, confidence: normalized.confidence, symbol: state.symbol });
+      const responsePayload = { ...normalized, metadata, mlflowRunId: runId || null, cache: { hit: false } };
       if (cacheKey) await llmCache?.set?.(cacheKey, responsePayload, metadata);
       return responsePayload;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       emitFallback(emit, reason);
-      return conservativeFallback(state, `Aggregator failed validation: ${reason}`);
+      emitOllamaState(emit, 'REQUEST_FAILED', { reason, symbol: state.symbol });
+      await mlflowManager?.log_prompt_error?.({ errorMessage: reason, runId });
+      return { ...conservativeFallback(state, `Aggregator failed validation: ${reason}`), mlflowRunId: runId || null };
     } finally {
       clearTimeout(timeout);
+      await mlflowManager?.end_prompt_run?.({ runId });
+      emitOllamaState(emit, 'REQUEST_FINISHED', { runId: runId || null, symbol: state.symbol });
     }
   };
 

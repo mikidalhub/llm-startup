@@ -235,6 +235,7 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
         status: 'started',
         triggerReason,
         acceptedAt: new Date().toISOString(),
+        mlflow_run_id: engine.getState().mlflow?.lastRunId || null,
         message: 'Process trigger accepted.'
       });
       return;

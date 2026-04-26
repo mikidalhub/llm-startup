@@ -38,6 +38,7 @@ type Signal = { timestamp?: string; symbol?: string; signal?: string; rsi?: numb
 type StockDetail = { symbol: string; name?: string; currentPrice?: number | null; sector?: string; totalTrades?: number };
 type StocksPayload = { details?: StockDetail[] };
 type BootstrapPayload = { state?: EngineState; results?: { signals?: Signal[] } };
+type ProcessEvent = { type?: string; status?: string; symbol?: string; payload?: Record<string, unknown>; timestamp?: string };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
@@ -57,6 +58,8 @@ export default function HomePage() {
   const [triggering, setTriggering] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
   const [error, setError] = useState('');
+  const [ollamaMessages, setOllamaMessages] = useState<string[]>([]);
+  const [liveReasoning, setLiveReasoning] = useState('');
 
   const loadDashboard = useCallback(async () => {
     setError('');
@@ -117,6 +120,26 @@ export default function HomePage() {
         try {
           const payload = JSON.parse((event as MessageEvent).data) as EngineState;
           setState(payload);
+        } catch {
+          // ignore parse issues
+        }
+      });
+      source.addEventListener('process', (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as ProcessEvent;
+          if (payload.type === 'LLM_STREAM') {
+            const token = String(payload.payload?.token || '');
+            if (!token) return;
+            setLiveReasoning((prev) => `${prev}${token}`.slice(-3000));
+            return;
+          }
+
+          if (payload.type === 'OLLAMA_STATE') {
+            const status = payload.status || 'UNKNOWN';
+            const detail = payload.payload ? JSON.stringify(payload.payload) : '';
+            setOllamaMessages((prev) => [`${asLocal(payload.timestamp)} · ${status} ${detail}`.trim(), ...prev].slice(0, 12));
+            if (status === 'REQUEST_STARTED') setLiveReasoning('');
+          }
         } catch {
           // ignore parse issues
         }
@@ -280,6 +303,36 @@ export default function HomePage() {
             </Card>
           </Grid>
         </Grid>
+
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Card variant="outlined" sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Live Ollama reasoning stream</Typography>
+                <Box sx={{ bgcolor: '#0b1020', color: '#dbeafe', borderRadius: 1, p: 1.5, minHeight: 120, maxHeight: 220, overflow: 'auto' }}>
+                  <Typography sx={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                    {liveReasoning || 'Waiting for LLM stream tokens...'}
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card variant="outlined" sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Real-time Ollama state</Typography>
+                <Stack spacing={0.8}>
+                  {ollamaMessages.map((message, idx) => (
+                    <Typography key={`${message}-${idx}`} sx={{ fontSize: 12, color: '#334155' }}>{message}</Typography>
+                  ))}
+                  {!ollamaMessages.length ? <Typography sx={{ color: '#64748b' }}>No Ollama state events yet.</Typography> : null}
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+
       </Stack>
     </Box>
   );

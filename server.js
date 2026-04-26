@@ -1,6 +1,7 @@
 import { TradingEngine, loadConfig } from './trading-engine.js';
 import { createServer } from './app-server.js';
 import { RedisStore } from './redis-store.js';
+import { MlflowManager } from './app/core/mlflow-manager.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const publicDir = new URL('./public/', import.meta.url);
@@ -21,7 +22,10 @@ if (process.env.REDIS_URL) {
   }
 }
 
-const engine = new TradingEngine(config, { redisStore });
+const mlflowManager = new MlflowManager();
+await mlflowManager.initialize_mlflow();
+
+const engine = new TradingEngine(config, { redisStore, mlflowManager });
 await engine.start();
 
 const server = createServer({ engine, publicDir, redisStore });
