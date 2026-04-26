@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -9,96 +8,88 @@ import {
   Card,
   CardContent,
   Chip,
-  CircularProgress,
-  Divider,
-  Grid,
+  Collapse,
+  LinearProgress,
   Stack,
   Typography
 } from '@mui/material';
 
-type EngineState = {
-  status?: { stage?: string; running?: boolean; message?: string; lastRunAt?: string | null };
-  portfolio?: {
-    metrics?: {
-      portfolioValue?: number;
-      pnl?: number;
-      sharpe?: number;
-      winRate?: number;
-      maxDrawdown?: number;
-      avgProfitPerTrade?: number;
-    };
-    positions?: Record<string, { shares: number; avgCost: number }>;
-  };
-  lastError?: string | null;
+type Thesis = {
+  valuationScore?: number;
+  businessQualityScore?: number;
+  financialHealthScore?: number;
+  growthScore?: number;
+  riskScore?: number;
+  fairValueEstimate?: number;
+  marginOfSafety?: number;
+  finalRecommendation?: 'BUY' | 'HOLD' | 'SELL' | string;
+  autopilotAction?: string;
+  recommendationConfidence?: number;
+  teacherExplanation?: { summary?: string; fullText?: string; stepByStep?: string[]; source?: string } | null;
 };
 
-type Trade = { ts?: string; symbol?: string; action?: string; price?: number; status?: string; shares?: number; reason?: string };
-type Decision = { id?: string | number; ts?: string; symbol?: string; action?: string; sizePct?: number; reason?: string; source?: string };
-type Signal = { timestamp?: string; symbol?: string; signal?: string; rsi?: number; price?: number };
-type StockDetail = { symbol: string; name?: string; currentPrice?: number | null; sector?: string; totalTrades?: number };
-type StocksPayload = { details?: StockDetail[] };
-type BootstrapPayload = { state?: EngineState; results?: { signals?: Signal[] } };
+type EngineState = {
+  status?: { stage?: string; running?: boolean; message?: string; lastRunAt?: string | null };
+  snapshots?: Record<string, { symbol?: string; price?: number }>;
+  latestDecisionIntelligence?: (Thesis & { symbol?: string }) | null;
+  teacherExplanation?: Thesis['teacherExplanation'];
+  mlflowRunId?: string | null;
+};
+
+type BootstrapPayload = { state?: EngineState };
+
+type ProcessEvent = { type?: string; timestamp?: string; message?: string; payload?: { token?: string } & Record<string, unknown> };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 const formatUsd = (value?: number | null) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
 
-const asLocal = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
+const formatPct = (value?: number | null) => `${((value || 0) * 100).toFixed(1)}%`;
+
+const scoreColor = (score: number) => (score >= 70 ? '#15803d' : score >= 50 ? '#0369a1' : '#b91c1c');
+
+const ScoreBar = ({ label, value }: { label: string; value: number }) => (
+  <Box>
+    <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.6 }}>
+      <Typography sx={{ color: '#334155' }}>{label}</Typography>
+      <Typography sx={{ color: '#0f172a', fontWeight: 600 }}>{Math.round(value)}/100</Typography>
+    </Stack>
+    <LinearProgress
+      variant="determinate"
+      value={Math.max(0, Math.min(100, value))}
+      sx={{
+        height: 10,
+        borderRadius: 99,
+        bgcolor: '#e2e8f0',
+        '& .MuiLinearProgress-bar': { bgcolor: scoreColor(value) }
+      }}
+    />
+  </Box>
+);
 
 export default function HomePage() {
   const [state, setState] = useState<EngineState>({});
-  const [stocks, setStocks] = useState<StockDetail[]>([]);
-  const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
   const [error, setError] = useState('');
+  const [showExplanation, setShowExplanation] = useState(true);
+  const [showLiveDrawer, setShowLiveDrawer] = useState(false);
+  const [processEvents, setProcessEvents] = useState<ProcessEvent[]>([]);
+  const [llmStreamText, setLlmStreamText] = useState('');
 
   const loadDashboard = useCallback(async () => {
-    setError('');
     try {
-      const [bootstrapRes, stocksRes, decisionsRes, tradesRes, signalsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/bootstrap`),
-        fetch(`${API_BASE}/api/stocks`),
-        fetch(`${API_BASE}/api/decisions`),
-        fetch(`${API_BASE}/api/trades`),
-        fetch(`${API_BASE}/api/signals`)
-      ]);
-
-      if (bootstrapRes.ok) {
-        const payload = (await bootstrapRes.json()) as BootstrapPayload;
-        setState(payload.state || {});
-        setSignals(payload.results?.signals || []);
-      }
-
-      if (stocksRes.ok) {
-        const payload = (await stocksRes.json()) as StocksPayload;
-        setStocks(payload.details || []);
-      }
-
-      if (decisionsRes.ok) {
-        const payload = (await decisionsRes.json()) as Decision[];
-        setDecisions(payload.slice(0, 8));
-      }
-
-      if (tradesRes.ok) {
-        const payload = (await tradesRes.json()) as Trade[];
-        setTrades(payload.slice(-8).reverse());
-      }
-
-      if (signalsRes.ok) {
-        const payload = (await signalsRes.json()) as Signal[];
-        if (payload.length) setSignals(payload.slice(-8).reverse());
-      }
+      const bootstrapRes = await fetch(`${API_BASE}/api/bootstrap`);
+      if (!bootstrapRes.ok) throw new Error(`Bootstrap request failed (${bootstrapRes.status})`);
+      const payload = (await bootstrapRes.json()) as BootstrapPayload;
+      setState(payload.state || {});
+      setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
+      setError(err instanceof Error ? err.message : 'Failed to load data.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
@@ -108,8 +99,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     let source: EventSource | null = null;
+
     const connect = () => {
       source = new EventSource(`${API_BASE}/events`);
       source.addEventListener('open', () => setSseConnected(true));
@@ -118,13 +109,24 @@ export default function HomePage() {
           const payload = JSON.parse((event as MessageEvent).data) as EngineState;
           setState(payload);
         } catch {
-          // ignore parse issues
+          setError('Received malformed state update.');
+        }
+      });
+      source.addEventListener('process', (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as ProcessEvent;
+          setProcessEvents((prev) => [payload, ...prev].slice(0, 50));
+          if (payload.type === 'LLM_STREAM' && typeof payload.payload?.token === 'string') {
+            setLlmStreamText((prev) => `${prev}${payload.payload?.token}`.slice(-1500));
+          }
+        } catch {
+          // keep stream alive
         }
       });
       source.addEventListener('error', () => {
         setSseConnected(false);
         source?.close();
-        setTimeout(connect, 2000);
+        setTimeout(connect, 2500);
       });
     };
 
@@ -132,154 +134,116 @@ export default function HomePage() {
     return () => source?.close();
   }, []);
 
-  const metrics = state.portfolio?.metrics;
-  const positionsCount = useMemo(() => Object.keys(state.portfolio?.positions || {}).length, [state.portfolio?.positions]);
+  const thesis = state.latestDecisionIntelligence || {};
+  const symbol = thesis.symbol || Object.keys(state.snapshots || {})[0] || 'N/A';
+  const currentPrice = state.snapshots?.[symbol]?.price || 0;
+  const recommendation = String(thesis.finalRecommendation || 'HOLD').toUpperCase();
+  const confidence = thesis.recommendationConfidence || 0;
+
+  const recommendationColor = useMemo(() => {
+    if (recommendation === 'BUY') return '#15803d';
+    if (recommendation === 'SELL') return '#b91c1c';
+    return '#334155';
+  }, [recommendation]);
 
   const triggerTick = async () => {
     setTriggering(true);
     try {
       await fetch(`${API_BASE}/api/process/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'UI_MANUAL_TRIGGER' }) });
-      setTimeout(() => {
-        setRefreshing(true);
-        void loadDashboard();
-      }, 600);
     } catch {
-      setError('Failed to trigger workflow.');
+      setError('Unable to start analysis. Please retry.');
     } finally {
       setTriggering(false);
     }
   };
 
+  const teacher = thesis.teacherExplanation || state.teacherExplanation || { summary: 'Explanation is being prepared.', stepByStep: [] };
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f7f9fc', color: '#0f172a', p: { xs: 2, md: 4 } }}>
-      <Stack spacing={3} sx={{ maxWidth: 1180, mx: 'auto' }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'center' }} spacing={1.5}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#fff', p: { xs: 2, md: 5 } }}>
+      <Stack spacing={2.5} sx={{ maxWidth: 980, mx: 'auto' }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'center' }}>
           <Box>
-            <Typography sx={{ fontSize: 34, fontWeight: 300 }}>Trading workflow</Typography>
-            <Typography sx={{ color: '#475569' }}>Minimal UI driven only by live backend endpoints and current engine state.</Typography>
+            <Typography sx={{ fontSize: 35, fontWeight: 300 }}>Autonomous Beginner Investing Mentor</Typography>
+            <Typography sx={{ color: '#64748b' }}>A disciplined, transparent recommendation with simple teaching guidance.</Typography>
           </Box>
           <Stack direction="row" spacing={1}>
-            <Button variant="outlined" component={Link} href="/trades">Trades</Button>
-            <Button variant="outlined" component={Link} href="/stocks">Stocks</Button>
-            <Button variant="outlined" component={Link} href="/decisions">Decisions</Button>
-            <Button variant="contained" onClick={triggerTick} disabled={triggering}>{triggering ? 'Starting…' : 'Run tick'}</Button>
-            <Button variant="text" onClick={() => { setRefreshing(true); void loadDashboard(); }} disabled={refreshing}>Refresh</Button>
+            <Button variant="outlined" onClick={() => void loadDashboard()}>Refresh</Button>
+            <Button variant="contained" onClick={triggerTick} disabled={triggering}>{triggering ? 'Starting…' : 'Run analysis'}</Button>
           </Stack>
         </Stack>
 
         {error ? <Alert severity="warning">{error}</Alert> : null}
+        {!sseConnected ? <Alert severity="info">Live stream disconnected. The page will keep retrying automatically.</Alert> : null}
 
-        <Grid container spacing={2}>
-          {[{
-            label: 'Engine stage',
-            value: state.status?.stage || 'idle'
-          }, {
-            label: 'Engine running',
-            value: state.status?.running ? 'yes' : 'no'
-          }, {
-            label: 'Last run',
-            value: asLocal(state.status?.lastRunAt)
-          }, {
-            label: 'Stream',
-            value: sseConnected ? 'connected' : 'disconnected'
-          }].map((item) => (
-            <Grid key={item.label} item xs={12} sm={6} md={3}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography sx={{ color: '#64748b', fontSize: 13 }}>{item.label}</Typography>
-                  <Typography sx={{ mt: 0.6, fontSize: 20 }}>{item.value}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
+        <Card variant="outlined" sx={{ borderRadius: 3 }}>
+          <CardContent>
+            <Typography sx={{ color: '#64748b', mb: 1 }}>FINAL DECISION</Typography>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between">
+              <Stack spacing={1}>
+                <Chip label={symbol} sx={{ width: 'fit-content' }} />
+                <Typography sx={{ fontSize: 40, fontWeight: 600, color: recommendationColor }}>{recommendation}</Typography>
+                <Typography>Confidence: {(confidence * 100).toFixed(0)}%</Typography>
+                <Typography>Autopilot action: {thesis.autopilotAction || 'WAIT'}</Typography>
+              </Stack>
+              <Stack spacing={0.8}>
+                <Typography>Current price: {formatUsd(currentPrice)}</Typography>
+                <Typography>Fair value estimate: {formatUsd(thesis.fairValueEstimate)}</Typography>
+                <Typography>Margin of safety: {formatPct(thesis.marginOfSafety)}</Typography>
+                <Typography sx={{ color: '#64748b' }}>Status: {state.status?.stage || 'IDLE'} {loading ? '(loading...)' : ''}</Typography>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
 
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={5}>
-            <Card variant="outlined" sx={{ height: '100%' }}>
-              <CardContent>
-                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Portfolio metrics</Typography>
-                <Stack spacing={1}>
-                  <Typography>Portfolio value: {formatUsd(metrics?.portfolioValue)}</Typography>
-                  <Typography>PnL: {formatUsd(metrics?.pnl)}</Typography>
-                  <Typography>Sharpe: {(metrics?.sharpe || 0).toFixed(2)}</Typography>
-                  <Typography>Win rate: {((metrics?.winRate || 0) * 100).toFixed(2)}%</Typography>
-                  <Typography>Max drawdown: {((metrics?.maxDrawdown || 0) * 100).toFixed(2)}%</Typography>
-                  <Typography>Avg profit/trade: {formatUsd(metrics?.avgProfitPerTrade)}</Typography>
-                  <Typography>Open positions: {positionsCount}</Typography>
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
+        <Card variant="outlined" sx={{ borderRadius: 3 }}>
+          <CardContent>
+            <Typography sx={{ color: '#64748b', mb: 2 }}>WHY THIS DECISION</Typography>
+            <Stack spacing={1.5}>
+              <ScoreBar label="Valuation" value={Number(thesis.valuationScore || 0)} />
+              <ScoreBar label="Business Quality" value={Number(thesis.businessQualityScore || 0)} />
+              <ScoreBar label="Financial Health" value={Number(thesis.financialHealthScore || 0)} />
+              <ScoreBar label="Growth" value={Number(thesis.growthScore || 0)} />
+              <ScoreBar label="Risk" value={Number(thesis.riskScore || 0)} />
+            </Stack>
+            <Button size="small" sx={{ mt: 1 }} onClick={() => setShowExplanation((prev) => !prev)}>
+              {showExplanation ? 'Hide explanation' : 'Show explanation'}
+            </Button>
+            <Collapse in={showExplanation}>
+              <Stack spacing={1} sx={{ mt: 1.2 }}>
+                <Typography sx={{ fontWeight: 500 }}>{teacher.summary || 'Explanation unavailable. Using deterministic rules only.'}</Typography>
+                {(teacher.stepByStep || []).map((line, idx) => (
+                  <Typography key={`${line}-${idx}`} sx={{ color: '#334155' }}>{idx + 1}. {line}</Typography>
+                ))}
+              </Stack>
+            </Collapse>
+          </CardContent>
+        </Card>
 
-          <Grid item xs={12} md={7}>
-            <Card variant="outlined" sx={{ height: '100%' }}>
-              <CardContent>
-                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Tracked stocks</Typography>
-                <Stack spacing={1}>
-                  {loading ? <CircularProgress size={20} /> : stocks.slice(0, 8).map((stock) => (
-                    <Stack key={stock.symbol} direction="row" justifyContent="space-between" alignItems="center">
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Chip label={stock.symbol} size="small" />
-                        <Typography>{stock.name || stock.symbol}</Typography>
-                      </Stack>
-                      <Typography sx={{ color: '#334155' }}>{formatUsd(stock.currentPrice)} · {stock.totalTrades || 0} trades</Typography>
-                    </Stack>
-                  ))}
-                  {!loading && !stocks.length ? <Typography sx={{ color: '#64748b' }}>No stocks currently tracked.</Typography> : null}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
-            <Card variant="outlined">
-              <CardContent>
-                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Recent decisions</Typography>
-                <Stack spacing={1.1}>
-                  {decisions.map((decision) => (
-                    <Box key={String(decision.id || `${decision.symbol}-${decision.ts}`)}>
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                        <Chip label={decision.symbol || '-'} size="small" />
-                        <Chip label={decision.action || '-'} size="small" color="primary" variant="outlined" />
-                        <Typography sx={{ color: '#64748b', fontSize: 13 }}>{asLocal(decision.ts)}</Typography>
-                        {decision.id ? <Button component={Link} href={`/decisions?id=${decision.id}`} size="small">Open</Button> : null}
-                      </Stack>
-                      <Typography sx={{ color: '#334155', mt: 0.5, fontSize: 14 }}>{decision.reason || 'No reason available.'}</Typography>
-                      <Divider sx={{ mt: 1 }} />
-                    </Box>
-                  ))}
-                  {!decisions.length ? <Typography sx={{ color: '#64748b' }}>No decisions available.</Typography> : null}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-
-          <Grid item xs={12} md={6}>
-            <Card variant="outlined">
-              <CardContent>
-                <Typography sx={{ fontSize: 18, fontWeight: 500, mb: 1 }}>Latest trades & signals</Typography>
-                <Stack spacing={1.2}>
-                  {trades.slice(0, 4).map((trade, idx) => (
-                    <Typography key={`${trade.ts || idx}-${trade.symbol}`} sx={{ fontSize: 14 }}>
-                      {trade.symbol || '-'} {trade.action || '-'} · {(trade.shares || 0).toFixed(4)} @ {formatUsd(trade.price)} · {asLocal(trade.ts)}
+        <Card variant="outlined" sx={{ borderRadius: 3 }}>
+          <CardContent>
+            <Button size="small" onClick={() => setShowLiveDrawer((prev) => !prev)}>
+              {showLiveDrawer ? 'Hide live thinking drawer' : 'Show live thinking drawer'}
+            </Button>
+            <Collapse in={showLiveDrawer}>
+              <Stack spacing={1.2} sx={{ mt: 1.2 }}>
+                <Typography sx={{ color: '#64748b' }}>LIVE THINKING</Typography>
+                <Typography sx={{ fontSize: 13, color: '#334155' }}>Ollama reasoning stream:</Typography>
+                <Typography sx={{ p: 1.2, bgcolor: '#f8fafc', borderRadius: 2, minHeight: 60, fontSize: 13 }}>{llmStreamText || 'Waiting for stream tokens...'}</Typography>
+                <Typography sx={{ fontSize: 13 }}>MLflow run id: {state.mlflowRunId || 'Unavailable'}</Typography>
+                <Typography sx={{ fontSize: 13, color: '#64748b' }}>Recent process events:</Typography>
+                <Stack spacing={0.5}>
+                  {processEvents.slice(0, 8).map((event, idx) => (
+                    <Typography key={`${event.timestamp || idx}-${event.type}`} sx={{ fontSize: 12, color: '#334155' }}>
+                      {(event.timestamp || '').replace('T', ' ').slice(0, 19)} · {event.type || 'event'}
                     </Typography>
                   ))}
-                  {!trades.length ? <Typography sx={{ color: '#64748b' }}>No trades available.</Typography> : null}
-                  <Divider />
-                  {signals.slice(0, 4).map((signal, idx) => (
-                    <Typography key={`${signal.timestamp || idx}-${signal.symbol}`} sx={{ fontSize: 14, color: '#334155' }}>
-                      {signal.symbol || '-'} {signal.signal || '-'} · RSI {(signal.rsi || 0).toFixed(2)} · {formatUsd(signal.price)}
-                    </Typography>
-                  ))}
-                  {!signals.length ? <Typography sx={{ color: '#64748b' }}>No signals available.</Typography> : null}
+                  {!processEvents.length ? <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>No process events yet.</Typography> : null}
                 </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+              </Stack>
+            </Collapse>
+          </CardContent>
+        </Card>
       </Stack>
     </Box>
   );
