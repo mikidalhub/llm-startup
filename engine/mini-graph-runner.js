@@ -4,6 +4,7 @@ import { runTechnicalAgent } from '../agents/technical-agent.js';
 import { runFundamentalAgent } from '../agents/fundamental-agent.js';
 import { runSentimentAgent } from '../agents/sentiment-agent.js';
 import { runAggregatorNode } from '../nodes/aggregator-node.js';
+import { runInvestmentThesisNode } from '../nodes/investment-thesis-node.js';
 import { runRiskNode } from '../nodes/risk-node.js';
 import { runExecutionNode } from '../nodes/execution-node.js';
 
@@ -25,6 +26,13 @@ export const runTradingGraph = async ({ state, emit, context }) => {
     fundamental: fanOutResults.find((item) => item.node === 'FUNDAMENTAL_AGENT')?.result || null,
     sentiment: fanOutResults.find((item) => item.node === 'SENTIMENT_AGENT')?.result || null
   };
+
+  state.investmentThesis = await runNode({
+    node: 'INVESTMENT_THESIS',
+    state,
+    emit,
+    fn: runInvestmentThesisNode
+  });
 
   state.aggregatedDecision = await runNode({
     node: 'AGGREGATOR',

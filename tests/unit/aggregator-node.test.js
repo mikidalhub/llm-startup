@@ -5,17 +5,17 @@ import { runAggregatorNode } from '../../nodes/aggregator-node.js';
 const baseState = {
   symbol: 'AAPL',
   snapshot: { symbol: 'AAPL', price: 190, rsi: 52, volume: 1000 },
-  position: { shares: 2, avgCost: 180 },
-  portfolioValue: 10000,
-  agentOutputs: {
-    technical: { action: 'HOLD', confidence: 0.5, reasoning: 'Neutral.' },
-    fundamental: { action: 'BUY', confidence: 0.6, reasoning: 'Value support.' },
-    sentiment: { action: 'HOLD', confidence: 0.4, reasoning: 'No catalyst.' }
-  },
-  memory: {
-    recentDecisions: [{ action: 'BUY', confidence: 0.7, reason: 'prior' }],
-    recentTrades: [{ symbol: 'AAPL', action: 'BUY', status: 'FILLED', price: 180 }],
-    metrics: { pnl: 123 }
+  investmentThesis: {
+    finalRecommendation: 'BUY',
+    recommendationConfidence: 0.74,
+    valuationScore: 78,
+    businessQualityScore: 70,
+    financialHealthScore: 72,
+    growthScore: 60,
+    riskScore: 66,
+    fairValueEstimate: 220,
+    marginOfSafety: 0.157,
+    autopilotAction: 'BUY_NOW'
   }
 };
 
@@ -29,9 +29,9 @@ const streamResponse = (chunks) => {
   return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
 };
 
-test('aggregator returns validated JSON from Ollama stream', async () => {
+test('aggregator returns teacher explanation JSON from Ollama stream', async () => {
   const response = streamResponse([
-    '{"message":{"content":"{\\"action\\":\\"BUY\\",\\"confidence\\":0.72,\\"reasoning\\":\\"Consensus bullish\\"}"}}\n'
+    '{"message":{"content":"{\\"summary\\":\\"Good business at reasonable value\\",\\"stepByStep\\":[\\"Step 1\\",\\"Step 2\\"],\\"fullText\\":\\"Step 1 then Step 2\\"}"}}\n'
   ]);
 
   const events = [];
@@ -45,12 +45,12 @@ test('aggregator returns validated JSON from Ollama stream', async () => {
   );
 
   assert.equal(decision.action, 'BUY');
-  assert.equal(decision.confidence, 0.72);
-  assert.equal(decision.reasoning, 'Consensus bullish');
+  assert.equal(decision.confidence, 0.74);
+  assert.equal(decision.teacherExplanation.summary, 'Good business at reasonable value');
   assert.equal(events.some((event) => event.type === 'LLM_STREAM'), true);
 });
 
-test('aggregator falls back to HOLD on invalid JSON', async () => {
+test('aggregator falls back to deterministic explanation on malformed JSON', async () => {
   const response = streamResponse([
     '{"message":{"content":"not-json-output"}}\n'
   ]);
@@ -64,6 +64,7 @@ test('aggregator falls back to HOLD on invalid JSON', async () => {
     }
   );
 
-  assert.equal(decision.action, 'HOLD');
+  assert.equal(decision.action, 'BUY');
   assert.equal(decision.source, 'fallback');
+  assert.equal(Array.isArray(decision.teacherExplanation.stepByStep), true);
 });

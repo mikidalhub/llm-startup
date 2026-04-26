@@ -11,6 +11,7 @@ import { buildBeginnerView, buildExplanation } from './explainer/investment-expl
 import { runTradingGraph } from './engine/mini-graph-runner.js';
 import { createGraphEventEmitter } from './events/graph-event-broadcaster.js';
 import { LlmCacheManager } from './engine/llm-cache-manager.js';
+import { MlflowObserver } from './app/core/mlflow-observer.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -117,6 +118,11 @@ export class TradingEngine {
     this.status = { stage: 'IDLE', message: 'Waiting for next cycle', running: false, lastRunAt: null };
     this.marketData = dependencies.marketData ?? new AlpacaClient({ fetchImpl: this.fetchFn });
     this.llmCache = new LlmCacheManager({ redisStore: this.redisStore });
+    this.mlflowObserver = dependencies.mlflowObserver ?? new MlflowObserver({ fetchFn: this.fetchFn });
+    this.latestMlflowRunId = null;
+    this.latestDecisionIntelligence = null;
+    this.latestTeacherExplanation = null;
+    this.thesisBySymbol = {};
   }
 
   onUpdate(listener) {
@@ -475,7 +481,11 @@ export class TradingEngine {
       portfolio: this.portfolio,
       operationResults: this.portfolio.operationResults || [],
       cumulativeRevenue: this.portfolio.operationResults?.reduce((sum, item) => sum + (item.signedValue || 0), 0) || 0,
-      lastError: this.lastError
+      lastError: this.lastError,
+      thesisBySymbol: this.thesisBySymbol,
+      latestDecisionIntelligence: this.latestDecisionIntelligence,
+      latestTeacherExplanation: this.latestTeacherExplanation,
+      latestMlflowRunId: this.latestMlflowRunId
     };
 
     await this.writeFileFn(this.config.outputPath, JSON.stringify(payload, null, 2));
@@ -501,6 +511,10 @@ export class TradingEngine {
     };
     this.snapshots = restored.snapshots ?? {};
     this.lastError = restored.lastError;
+    this.thesisBySymbol = restored.thesisBySymbol ?? {};
+    this.latestDecisionIntelligence = restored.latestDecisionIntelligence ?? null;
+    this.latestTeacherExplanation = restored.latestTeacherExplanation ?? null;
+    this.latestMlflowRunId = restored.latestMlflowRunId ?? null;
   }
 
   async tick(source = 'SCHEDULED') {
@@ -533,6 +547,7 @@ export class TradingEngine {
         const graphState = {
           symbol,
           snapshot,
+          quoteSummary: await this.getQuoteData(symbol).catch(() => null),
           tickSource: source,
           tickTimestamp: this.clock(),
           position: this.portfolio.positions[symbol] || { shares: 0, avgCost: 0 },
@@ -555,6 +570,8 @@ export class TradingEngine {
         const orchestrated = await runTradingGraph({ state: graphState, emit: graphEmit, context: graphContext });
         const decision = orchestrated.riskDecision;
         const trade = orchestrated.execution;
+        const thesis = orchestrated.investmentThesis || {};
+        const teacherExplanation = orchestrated.aggregatedDecision?.teacherExplanation || null;
         const decisionTimestamp = graphState.tickTimestamp;
         this.emitEvent('decision-made', { symbol, action: decision.action, size_pct: decision.size_pct });
         const decisionRecord = {
@@ -568,6 +585,19 @@ export class TradingEngine {
           confidence: Number(decision.confidence ?? 0),
           riskStatus: decision.risk_status || 'RISK_APPROVED',
           riskReason: decision.risk_reason || null,
+          thesis: {
+            valuationScore: thesis.valuationScore ?? null,
+            businessQualityScore: thesis.businessQualityScore ?? null,
+            financialHealthScore: thesis.financialHealthScore ?? null,
+            growthScore: thesis.growthScore ?? null,
+            riskScore: thesis.riskScore ?? null,
+            fairValueEstimate: thesis.fairValueEstimate ?? null,
+            marginOfSafety: thesis.marginOfSafety ?? null,
+            finalRecommendation: thesis.finalRecommendation || decision.action || 'HOLD',
+            autopilotAction: thesis.autopilotAction || 'WAIT',
+            recommendationConfidence: thesis.recommendationConfidence ?? Number(decision.confidence ?? 0),
+            teacherExplanation
+          },
           graph: {
             technical: orchestrated.agentOutputs?.technical || null,
             fundamental: orchestrated.agentOutputs?.fundamental || null,
@@ -576,6 +606,9 @@ export class TradingEngine {
         };
 
         await this.redisStore?.appendDecision(decisionRecord);
+        this.thesisBySymbol[symbol] = decisionRecord.thesis;
+        this.latestDecisionIntelligence = { symbol, ...decisionRecord.thesis };
+        this.latestTeacherExplanation = teacherExplanation;
         this.emitEvent('llm-cache', {
           symbol,
           hit: Boolean(orchestrated.aggregatedDecision?.cache?.hit),
@@ -586,6 +619,22 @@ export class TradingEngine {
         this.status = { stage: 'TRADING', message: `Executing ${decision.action} for ${symbol}`, running: true, lastRunAt: this.clock() };
 
         await this.redisStore?.appendTrade(trade);
+        const mlflowPayload = {
+          symbol,
+          valuationScore: Number(thesis.valuationScore ?? 0),
+          businessQualityScore: Number(thesis.businessQualityScore ?? 0),
+          financialHealthScore: Number(thesis.financialHealthScore ?? 0),
+          growthScore: Number(thesis.growthScore ?? 0),
+          riskScore: Number(thesis.riskScore ?? 0),
+          fairValueEstimate: Number(thesis.fairValueEstimate ?? snapshot.price ?? 0),
+          marginOfSafety: Number(thesis.marginOfSafety ?? 0),
+          finalRecommendation: String(thesis.finalRecommendation || decision.action || 'HOLD'),
+          autopilotAction: String(thesis.autopilotAction || 'WAIT'),
+          recommendationConfidence: Number(thesis.recommendationConfidence ?? decision.confidence ?? 0.35)
+        };
+        const mlflowRun = await this.mlflowObserver.logDecisionIntelligence(mlflowPayload);
+        this.latestMlflowRunId = mlflowRun.runId;
+        this.emitEvent('mlflow-logged', { symbol, runId: mlflowRun.runId, status: mlflowRun.status, reason: mlflowRun.reason || null });
         const operationResult = this.computeOperationResult(trade, snapshot);
         this.portfolio.operationResults.push(operationResult);
         if (this.portfolio.operationResults.length > 1000) this.portfolio.operationResults = this.portfolio.operationResults.slice(-1000);
@@ -652,7 +701,11 @@ export class TradingEngine {
         dailyRunAt: `${String(this.config.dailySchedule?.hour ?? 9).padStart(2, '0')}:${String(this.config.dailySchedule?.minute ?? 0).padStart(2, '0')}`,
         timezone: this.config.dailySchedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
         enabled: this.config.dailySchedule?.enabled !== false
-      }
+      },
+      thesisBySymbol: this.thesisBySymbol,
+      latestDecisionIntelligence: this.latestDecisionIntelligence,
+      teacherExplanation: this.latestTeacherExplanation,
+      mlflowRunId: this.latestMlflowRunId
     };
   }
 }
