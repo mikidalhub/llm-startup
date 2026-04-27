@@ -1,15 +1,17 @@
 export const runFundamentalAgent = async (state) => {
   const symbol = state.symbol;
-  const defaultAction = state.position?.shares > 0 ? 'HOLD' : 'BUY';
+  const quote = state.quoteSummary || {};
 
   return {
-    action: defaultAction,
+    name: 'fundamental-agent',
     confidence: 0.52,
-    reasoning: `Fundamental model is lightweight in runtime mode; preserving long-horizon posture for ${symbol}.`,
-    risk_params: {
-      max_position_pct: 0.08,
-      stop_loss_pct: 0.06,
-      take_profit_pct: 0.1
+    data: {
+      symbol,
+      revenueGrowth: Number(quote.revenueGrowth ?? 0),
+      operatingMargins: Number(quote.operatingMargins ?? 0),
+      debtToEquity: Number(quote.debtToEquity ?? 0),
+      returnOnEquity: Number(quote.returnOnEquity ?? 0),
+      freeCashflow: Number(quote.freeCashflow ?? 0)
     }
   };
 };

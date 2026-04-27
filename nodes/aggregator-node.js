@@ -120,7 +120,12 @@ export const runAggregatorNode = async (state, emit, context = {}) => {
     return buildFallbackDecision(state, 'Ollama unavailable; deterministic teacher fallback used.');
   }
 
-  const prompt = buildTeacherPrompt({ thesis, symbol: state.symbol, snapshot: state.snapshot });
+  const prompt = buildTeacherPrompt({
+    thesis,
+    symbol: state.symbol,
+    snapshot: state.snapshot,
+    agentOutputs: state.agentOutputs || {}
+  });
   const cacheKey = llmCache?.makeKey?.({
     promptTemplate: TEACHER_SYSTEM_PROMPT,
     contextSnapshot: { thesis, model: llm.model, symbol: state.symbol }

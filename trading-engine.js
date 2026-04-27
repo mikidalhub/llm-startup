@@ -601,7 +601,9 @@ export class TradingEngine {
           graph: {
             technical: orchestrated.agentOutputs?.technical || null,
             fundamental: orchestrated.agentOutputs?.fundamental || null,
-            sentiment: orchestrated.agentOutputs?.sentiment || null
+            sentiment: orchestrated.agentOutputs?.sentiment || null,
+            risk: orchestrated.agentOutputs?.risk || null,
+            agentTrace: orchestrated.agentTrace || []
           }
         };
 

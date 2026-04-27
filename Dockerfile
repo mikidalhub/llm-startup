@@ -12,6 +12,7 @@ COPY api-docs.js ./api-docs.js
 COPY redis-store.js ./redis-store.js
 COPY trading-engine.js ./trading-engine.js
 COPY config.yaml ./config.yaml
+COPY app ./app
 COPY analysis ./analysis
 COPY agents ./agents
 COPY data ./data
