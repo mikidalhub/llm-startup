@@ -28,7 +28,7 @@ export const buildDeterministicTeacherFallback = (thesis) => {
   };
 };
 
-export const buildTeacherPrompt = ({ thesis, symbol, snapshot }) => ({
+export const buildTeacherPrompt = ({ thesis, symbol, snapshot, agentOutputs = {} }) => ({
   role: 'user',
   content: JSON.stringify({
     objective: 'Explain deterministic recommendation to a beginner investor in clear educational language.',
@@ -41,6 +41,7 @@ export const buildTeacherPrompt = ({ thesis, symbol, snapshot }) => ({
     ],
     symbol,
     currentPrice: snapshot?.price,
-    thesis
+    thesis,
+    agentSignals: agentOutputs
   })
 });

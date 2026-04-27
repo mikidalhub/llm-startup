@@ -30,6 +30,7 @@ test('buildFallbackDecision follows RSI bands', () => {
 test('TradingEngine tick writes results and records trade with synthetic fallback', async () => {
   const writes = [];
   const redisCalls = { decisions: 0, trades: 0, results: 0, state: 0 };
+  const decisionRecords = [];
   const engine = new TradingEngine(baseConfig, {
     fetchFn: async () => {
       throw new Error('network down');
@@ -39,7 +40,7 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
     },
     clock: () => '2024-01-01T00:00:00.000Z',
     redisStore: {
-      appendDecision: async () => { redisCalls.decisions += 1; },
+      appendDecision: async (record) => { redisCalls.decisions += 1; decisionRecords.push(record); },
       appendTrade: async () => { redisCalls.trades += 1; },
       cacheResults: async () => { redisCalls.results += 1; },
       cacheState: async () => { redisCalls.state += 1; },
@@ -58,6 +59,9 @@ test('TradingEngine tick writes results and records trade with synthetic fallbac
   assert.equal(redisCalls.trades, 1);
   assert.equal(redisCalls.results, 1);
   assert.equal(redisCalls.state, 1);
+  assert.equal(Array.isArray(decisionRecords[0].graph.agentTrace), true);
+  assert.equal(decisionRecords[0].graph.agentTrace.length, 4);
+  assert.equal(decisionRecords[0].graph.risk.name, 'risk-agent');
 });
 
 test('TradingEngine restores durable state on start bootstrap', async () => {

@@ -2,13 +2,13 @@ export const runSentimentAgent = async (state) => {
   const symbol = state.symbol;
 
   return {
-    action: 'HOLD',
+    name: 'sentiment-agent',
     confidence: 0.4,
-    reasoning: `Sentiment feed is running in stub mode for ${symbol}; no strong directional signal.`,
-    risk_params: {
-      max_position_pct: 0.05,
-      stop_loss_pct: 0.05,
-      take_profit_pct: 0.09
+    data: {
+      symbol,
+      sentimentScore: 0,
+      newsPolarity: 0,
+      socialPolarity: 0
     }
   };
 };
