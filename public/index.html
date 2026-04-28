@@ -125,6 +125,13 @@
       const eventLog = document.getElementById('event-log');
       const processText = document.getElementById('process-text');
       const statusPill = document.getElementById('status-pill');
+      const DEFAULT_BACKEND_ORIGIN = 'https://llm-startup.onrender.com';
+      const apiOrigin = (() => {
+        if (window.__API_ORIGIN && typeof window.__API_ORIGIN === 'string') return window.__API_ORIGIN;
+        if (window.location.hostname.endsWith('github.io')) return DEFAULT_BACKEND_ORIGIN;
+        return '';
+      })();
+      const apiUrl = (path) => `${apiOrigin}${path}`;
 
       const toLight = (score) => {
         if (score >= 70) return { text: 'GREEN', className: 'pill green' };
@@ -178,13 +185,13 @@
       };
 
       const refresh = async () => {
-        const response = await fetch('/api/results');
+        const response = await fetch(apiUrl('/api/results'));
         const payload = await response.json();
         render(payload);
       };
 
       const connectEvents = () => {
-        const stream = new EventSource('/events');
+        const stream = new EventSource(apiUrl('/events'));
         stream.addEventListener('state', (event) => {
           const state = JSON.parse(event.data);
           if (state.status?.running) {
@@ -214,7 +221,7 @@
       document.getElementById('start-process').addEventListener('click', async () => {
         setRunning(true, 'Manual process started...');
         pushEvent('manual-start-requested');
-        await fetch('/api/process/start', { method: 'POST' });
+        await fetch(apiUrl('/api/process/start'), { method: 'POST' });
       });
 
       refresh().catch((err) => setRunning(false, `Data error: ${err.message}`));
