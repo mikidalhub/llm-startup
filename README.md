@@ -176,6 +176,11 @@ Open `http://localhost:8080` (or `PORT` override).
 docker compose up --build
 ```
 
+MLflow will be started automatically with Compose and is accessible at:
+
+- `http://localhost:5001` (from your host machine/browser)
+- `http://mlflow:5000` (from inside Docker network, used by `mvp`)
+
 ---
 
 ## 8) Configuration
@@ -199,6 +204,8 @@ Environment overrides supported for selected fields:
 - `OLLAMA_URL`
 - `REDIS_URL`
 - `REDIS_NAMESPACE`
+- `MLFLOW_TRACKING_URL`
+- `MLFLOW_EXPERIMENT_ID`
 
 ---
 
@@ -234,6 +241,7 @@ For complete endpoint details, see `docs/API_REFERENCE.md`.
 
 ## 11) Documentation Map
 
+- `docs/BEGINNER_AGENT_FLOW.md` – beginner-first walkthrough of agent communication, graph order, LLM call locations, and prompts.
 - `docs/SYSTEM_AUDIT_AND_ENHANCEMENT_PLAN.md` – full audit, architecture deep dive, risks, roadmap.
 - `docs/API_REFERENCE.md` – endpoint contracts.
 - `docs/BACKEND_ARCHITECTURE.md` – backend runtime and deployment health checks.

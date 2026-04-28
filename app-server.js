@@ -188,6 +188,18 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
       client.write(payload);
     }
     sendWsEvent('state', state);
+    void (async () => {
+      try {
+        const results = await readResultsPayload({ resultsPath, redisStore });
+        const resultsPayload = `event: results\ndata: ${JSON.stringify(results)}\n\n`;
+        for (const client of sseClients) {
+          client.write(resultsPayload);
+        }
+        sendWsEvent('results', results);
+      } catch {
+        // keep state streaming resilient even if results payload read fails
+      }
+    })();
   });
   engine.onEvent?.((event) => {
     const payload = `event: process\ndata: ${JSON.stringify(event)}\n\n`;
@@ -218,6 +230,10 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
         Connection: 'keep-alive'
       });
       res.write(`event: state\ndata: ${JSON.stringify(engine.getState())}\n\n`);
+      {
+        const results = await readResultsPayload({ resultsPath, redisStore });
+        res.write(`event: results\ndata: ${JSON.stringify(results)}\n\n`);
+      }
       res.write(`event: process\ndata: ${JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString(), message: 'Event stream connected' })}\n\n`);
       sseClients.add(res);
       req.on('close', () => {
@@ -484,6 +500,14 @@ export const createServer = ({ engine, publicDir, redisStore = null }) => {
     socket.on('error', () => wsClients.delete(socket));
 
     socket.write(toWebSocketFrame(JSON.stringify({ channel: 'state', data: engine.getState() })));
+    void (async () => {
+      try {
+        const results = await readResultsPayload({ resultsPath, redisStore });
+        socket.write(toWebSocketFrame(JSON.stringify({ channel: 'results', data: results })));
+      } catch {
+        // keep websocket session alive even if results payload read fails
+      }
+    })();
     socket.write(toWebSocketFrame(JSON.stringify({
       channel: 'process',
       data: { type: 'heartbeat', timestamp: new Date().toISOString(), message: 'WebSocket connected' }

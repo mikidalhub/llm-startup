@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import ThemeRegistry from './theme-registry';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Agentic Trading Control Center',
-  description: 'Transparent AI-assisted trading simulation platform with realtime decisions, execution telemetry, and portfolio analytics.',
-  applicationName: 'Agentic Trading Control Center',
+  title: 'AI Thinking Journey',
+  description: 'A beginner-friendly, step-by-step visualization of how an AI stock trading team thinks and acts.',
+  applicationName: 'AI Thinking Journey',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
@@ -15,14 +16,14 @@ export const metadata: Metadata = {
     apple: '/icons/trading-favicon.svg'
   },
   openGraph: {
-    title: 'Agentic Trading Control Center',
-    description: 'AI-assisted trading simulator with full decision and execution transparency.',
+    title: 'AI Thinking Journey',
+    description: 'Understand an AI trading cycle in calm, simple, visual steps.',
     type: 'website'
   },
   twitter: {
     card: 'summary',
-    title: 'Agentic Trading Control Center',
-    description: 'Realtime AI trading observability dashboard and simulation engine.'
+    title: 'AI Thinking Journey',
+    description: 'A beginner-friendly UI for understanding AI-assisted trading decisions.'
   }
 };
 

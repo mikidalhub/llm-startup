@@ -184,12 +184,6 @@
         }
       };
 
-      const refresh = async () => {
-        const response = await fetch(apiUrl('/api/results'));
-        const payload = await response.json();
-        render(payload);
-      };
-
       const connectEvents = () => {
         const stream = new EventSource(apiUrl('/events'));
         stream.addEventListener('state', (event) => {
@@ -201,6 +195,11 @@
           }
         });
 
+        stream.addEventListener('results', (event) => {
+          const payload = JSON.parse(event.data);
+          render(payload);
+        });
+
         stream.addEventListener('process', (event) => {
           const process = JSON.parse(event.data);
           const label = process.symbol ? `${process.type}: ${process.symbol}` : process.type;
@@ -209,7 +208,6 @@
           if (process.type === 'tick-started') setRunning(true, `Running ${process.source || 'cycle'}...`);
           if (process.type === 'tick-finished') {
             setRunning(false, process.errors ? `Finished with warnings` : 'Cycle complete');
-            void refresh();
           }
         });
 
@@ -224,8 +222,6 @@
         await fetch(apiUrl('/api/process/start'), { method: 'POST' });
       });
 
-      refresh().catch((err) => setRunning(false, `Data error: ${err.message}`));
-      setInterval(() => refresh().catch(() => {}), 5000);
       connectEvents();
     </script>
   </body>
