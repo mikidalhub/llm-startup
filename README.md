@@ -241,6 +241,7 @@ For complete endpoint details, see `docs/API_REFERENCE.md`.
 
 ## 11) Documentation Map
 
+- `docs/BEGINNER_AGENT_FLOW.md` – beginner-first walkthrough of agent communication, graph order, LLM call locations, and prompts.
 - `docs/SYSTEM_AUDIT_AND_ENHANCEMENT_PLAN.md` – full audit, architecture deep dive, risks, roadmap.
 - `docs/API_REFERENCE.md` – endpoint contracts.
 - `docs/BACKEND_ARCHITECTURE.md` – backend runtime and deployment health checks.
