@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "next dev",
+    "dev:backend": "node server.js",
     "build": "next build",
-    "start": "node server.js",
+    "start": "next start",
+    "start:backend": "node server.js",
     "test": "npm run test:unit",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
