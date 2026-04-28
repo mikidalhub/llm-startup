@@ -176,6 +176,11 @@ Open `http://localhost:8080` (or `PORT` override).
 docker compose up --build
 ```
 
+MLflow will be started automatically with Compose and is accessible at:
+
+- `http://localhost:5001` (from your host machine/browser)
+- `http://mlflow:5000` (from inside Docker network, used by `mvp`)
+
 ---
 
 ## 8) Configuration
@@ -199,6 +204,8 @@ Environment overrides supported for selected fields:
 - `OLLAMA_URL`
 - `REDIS_URL`
 - `REDIS_NAMESPACE`
+- `MLFLOW_TRACKING_URL`
+- `MLFLOW_EXPERIMENT_ID`
 
 ---
 
