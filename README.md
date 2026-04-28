@@ -169,7 +169,13 @@ npm ci
 ```bash
 npm run dev
 ```
-Open `http://localhost:8080` (or `PORT` override).
+Open `http://localhost:3000`.
+
+If you want to run the backend API server (SSE/WS + `/api/*`) separately:
+```bash
+npm run dev:backend
+```
+Backend defaults to `http://localhost:8080` (or `PORT` override).
 
 ### Run with Docker Compose
 ```bash
