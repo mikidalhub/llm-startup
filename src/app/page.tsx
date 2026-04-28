@@ -40,7 +40,14 @@ type BootstrapPayload = { state?: EngineState };
 
 type ProcessEvent = { type?: string; timestamp?: string; message?: string; payload?: { token?: string } & Record<string, unknown> };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const getApiBase = () => {
+  const configured = process.env.NEXT_PUBLIC_API_ORIGIN || process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (configured) return configured;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+    return 'https://llm-startup.onrender.com';
+  }
+  return '';
+};
 
 const formatUsd = (value?: number | null) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value || 0);
@@ -69,6 +76,7 @@ const ScoreBar = ({ label, value }: { label: string; value: number }) => (
 );
 
 export default function HomePage() {
+  const apiBase = useMemo(() => getApiBase(), []);
   const [state, setState] = useState<EngineState>({});
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
@@ -81,7 +89,7 @@ export default function HomePage() {
 
   const loadDashboard = useCallback(async () => {
     try {
-      const bootstrapRes = await fetch(`${API_BASE}/api/bootstrap`);
+      const bootstrapRes = await fetch(`${apiBase}/api/bootstrap`);
       if (!bootstrapRes.ok) throw new Error(`Bootstrap request failed (${bootstrapRes.status})`);
       const payload = (await bootstrapRes.json()) as BootstrapPayload;
       setState(payload.state || {});
@@ -91,7 +99,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiBase]);
 
   useEffect(() => {
     void loadDashboard();
@@ -102,7 +110,7 @@ export default function HomePage() {
     let source: EventSource | null = null;
 
     const connect = () => {
-      source = new EventSource(`${API_BASE}/events`);
+      source = new EventSource(`${apiBase}/events`);
       source.addEventListener('open', () => setSseConnected(true));
       source.addEventListener('state', (event) => {
         try {
@@ -132,7 +140,7 @@ export default function HomePage() {
 
     connect();
     return () => source?.close();
-  }, []);
+  }, [apiBase]);
 
   const thesis = state.latestDecisionIntelligence || {};
   const symbol = thesis.symbol || Object.keys(state.snapshots || {})[0] || 'N/A';
@@ -149,7 +157,7 @@ export default function HomePage() {
   const triggerTick = async () => {
     setTriggering(true);
     try {
-      await fetch(`${API_BASE}/api/process/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'UI_MANUAL_TRIGGER' }) });
+      await fetch(`${apiBase}/api/process/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'UI_MANUAL_TRIGGER' }) });
     } catch {
       setError('Unable to start analysis. Please retry.');
     } finally {
