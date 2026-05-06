@@ -21,6 +21,15 @@ const actionTone: Record<string, string> = {
   SELL: 'text-rose-700 bg-rose-100'
 };
 
+const techStack = [
+  'Next.js + React + TypeScript frontend',
+  'Tailwind CSS for kid-friendly visual styles',
+  'Framer Motion for smooth learning animations',
+  'Node.js services for trading and AI workflows',
+  'Agent system (technical, fundamental, sentiment, risk)',
+  'Redis cache and test coverage with Playwright + unit tests'
+];
+
 export function AIThinkingJourney() {
   const [cycleIndex, setCycleIndex] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -71,20 +80,21 @@ export function AIThinkingJourney() {
 
   return (
     <main className="mx-auto min-h-screen max-w-[1700px] px-5 py-10 md:px-10">
-      <section className="rounded-2xl border border-white/80 bg-white/90 p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+      <section className="rounded-2xl border border-white/80 bg-white/95 p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-medium text-violet-600">AI Thinking Journey</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">{cycle.symbol}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-              Watch friendly AI experts think from left to right in one calm learning story. No jargon, just clear decisions.
+            <p className="text-sm font-semibold text-violet-700">LLM Startup • Kid-Friendly Trade Learn App</p>
+            <h1 className="mt-1 text-4xl font-bold tracking-tight text-slate-900">{cycle.symbol}</h1>
+            <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-700">
+              Learn trading like a storybook: friendly AI helpers explain each step with simple words, safety checks,
+              and easy visuals.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
-              <p className="text-xs text-slate-500">Current Price</p>
-              <p className="text-2xl font-semibold text-slate-900">{price.format(cycle.price)}</p>
-              <p className={`text-xs ${cycle.changePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <div className="rounded-2xl border border-slate-100 bg-sky-50 px-4 py-3">
+              <p className="text-xs font-semibold text-slate-600">Current Price</p>
+              <p className="text-2xl font-bold text-slate-900">{price.format(cycle.price)}</p>
+              <p className={`text-sm font-semibold ${cycle.changePct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                 {cycle.changePct >= 0 ? '+' : ''}
                 {cycle.changePct.toFixed(2)}%
               </p>
@@ -92,7 +102,7 @@ export function AIThinkingJourney() {
             <button
               type="button"
               onClick={() => setInspectorOpen((prev) => !prev)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               {inspectorOpen ? 'Hide inspector' : 'Show inspector'}
             </button>
@@ -100,9 +110,28 @@ export function AIThinkingJourney() {
         </div>
       </section>
 
+      <section className="mt-6 grid gap-4 lg:grid-cols-2">
+        <article className="rounded-2xl border border-violet-100 bg-violet-50 p-5">
+          <h2 className="text-lg font-bold text-violet-900">Business explained</h2>
+          <p className="mt-2 text-sm leading-relaxed text-violet-900/90">
+            LLM Startup helps kids and beginners practice smart trading decisions in a safe, educational environment.
+            Instead of real-money pressure, learners watch AI agents research, debate, and explain the "why" behind
+            each action.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-sky-100 bg-sky-50 p-5">
+          <h2 className="text-lg font-bold text-sky-900">Tech stack</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-sky-900/90">
+            {techStack.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </article>
+      </section>
+
       <section className="mt-7 flex gap-6">
         <div className="min-w-0 flex-1 overflow-x-auto pb-3">
-          <div className="mb-3 inline-flex rounded-full border border-violet-100 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">
+          <div className="mb-3 inline-flex rounded-full border border-violet-100 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
             Expert Team: Technical + Fundamental + Sentiment + Risk
           </div>
           <div className="flex min-w-max items-start gap-4 pr-6">
@@ -137,9 +166,9 @@ export function AIThinkingJourney() {
         <AdvancedInspector open={inspectorOpen} activeStepTitle={currentStage} statuses={statuses} symbol={cycle.symbol} />
       </section>
 
-      <section className="mt-8 rounded-2xl border border-white/80 bg-white/90 p-6 shadow-[0_16px_45px_rgba(15,23,42,0.08)]">
-        <h2 className="text-lg font-semibold text-slate-900">What happened this cycle?</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{cycle.narratedSummary}</p>
+      <section className="mt-8 rounded-2xl border border-white/80 bg-white/95 p-6 shadow-[0_16px_45px_rgba(15,23,42,0.08)]">
+        <h2 className="text-lg font-bold text-slate-900">What happened this cycle?</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-700">{cycle.narratedSummary}</p>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${actionTone[cycle.finalAction]}`}>
@@ -157,7 +186,7 @@ export function AIThinkingJourney() {
 
         <ol className="mt-5 space-y-2">
           {cycle.simpleTimeline.map((line) => (
-            <li key={line} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <li key={line} className="rounded-xl bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">
               {line}
             </li>
           ))}
@@ -170,7 +199,7 @@ export function AIThinkingJourney() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+              className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800"
             >
               Safety Guard protection activated: it overrode {cycle.decisionBeforeSafety} to {cycle.finalAction} before execution.
             </motion.div>
