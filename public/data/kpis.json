@@ -1,8 +1,8 @@
 {
-  "asOfUtc": "2026-07-21T08:43:56.425Z",
+  "asOfUtc": "2026-07-22T08:43:11.471Z",
   "cagrTargetPct": "12%-15%",
   "drawdownLimitPct": "-18%",
-  "winRatePct": "61%",
-  "sharpeProxy": "1.48",
+  "winRatePct": "58%",
+  "sharpeProxy": "1.35",
   "valueCoveragePct": "92%"
 }
